@@ -695,6 +695,17 @@ label:first-child { margin-top: 0; }
     <input type="password" id="cfg-token" autocomplete="off" placeholder="github_pat_…">
     <label>Mein Kürzel</label>
     <input type="text" id="cfg-person" autocomplete="off" placeholder="z. B. lw" maxlength="10">
+    <div style="margin:16px 0 10px;border-top:1px solid var(--border)"></div>
+    <h3 style="font-size:14px;margin-bottom:4px;color:var(--text-dim)">Geteilte Daten (spaz Verlag)</h3>
+    <p class="hint" style="margin-bottom:10px">Optional: Separate Datei für spaz Verlag–Einträge, die mit dem Team geteilt wird.</p>
+    <label>GitHub-Benutzername (geteilt)</label>
+    <input type="text" id="cfg-shared-owner" autocomplete="off" autocapitalize="off" placeholder="team-username">
+    <label>Daten-Repo (geteilt)</label>
+    <input type="text" id="cfg-shared-repo" autocomplete="off" autocapitalize="off" value="spaz-verlag-data">
+    <label>Datei-Pfad (geteilt)</label>
+    <input type="text" id="cfg-shared-path" autocomplete="off" autocapitalize="off" value="data.json">
+    <label>Personal Access Token (geteilt)</label>
+    <input type="password" id="cfg-shared-token" autocomplete="off" placeholder="github_pat_…">
     <div id="cfg-result"></div>
     <div class="modal-buttons">
       <button class="cancel" id="cfg-cancel">Abbrechen</button>
@@ -974,8 +985,8 @@ function setSyncStatus(s, hint) {
   }[s] || '');
 }
 
-async function githubGet() {
-  const { token, owner, repo, path } = syncConfig;
+async function githubGet(cfg) {
+  const { token, owner, repo, path } = cfg;
   const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
   const r = await fetch(url, {
     headers: {
@@ -985,7 +996,7 @@ async function githubGet() {
     },
     cache: 'no-store'
   });
-  if (r.status === 404) return { entries: [], tasks: [], sha: null };
+  if (r.status === 404) return { entries: [], tasks: [], active: null, activeModified: null, sha: null };
   if (!r.ok) {
     const t = await r.text();
     throw new Error(`GET ${r.status}: ${t.slice(0,200)}`);
@@ -1003,12 +1014,14 @@ async function githubGet() {
   };
 }
 
-async function githubPut(allEntries, allTasks, activeObj, activeModStr, sha) {
-  const { token, owner, repo, path } = syncConfig;
+async function githubPut(cfg, allEntries, allTasks, activeObj, activeModStr, sha) {
+  const { token, owner, repo, path } = cfg;
   const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
+  const payload = { version: 1, updated: nowIso(), entries: allEntries, tasks: allTasks };
+  if (activeModStr != null) { payload.active = activeObj; payload.activeModified = activeModStr; }
   const body = {
     message: `Sync ${new Date().toISOString()}`,
-    content: utf8ToBase64(JSON.stringify({ version: 1, updated: nowIso(), entries: allEntries, tasks: allTasks, active: activeObj, activeModified: activeModStr }, null, 2)),
+    content: utf8ToBase64(JSON.stringify(payload, null, 2)),
   };
   if (sha) body.sha = sha;
   const r = await fetch(url, {
@@ -1076,42 +1089,103 @@ async function syncNow({ force = false } = {}) {
   if (syncInFlight) return;
   syncInFlight = true;
   setSyncStatus('syncing');
+  const hasShared = !!(syncConfig.shared && syncConfig.shared.owner && syncConfig.shared.token);
   try {
     let attempts = 0;
     while (attempts < 3) {
       attempts++;
-      const remote = await githubGet();
-      // Lokale entries enthalten KEINE Tombstones (die sind nur im Sync-Stream)
-      // Für den Merge brauchen wir aber lokale + remote inkl. Tombstones
-      const localWithTombstones = entries.slice();
-      const merged = mergeEntries(localWithTombstones, remote.entries);
-      const sameAsRemote = entriesEqual(merged, remote.entries);
-      const visibleMerged = visibleEntries(merged);
-      const sameAsLocal = entriesEqual(visibleMerged, entries);
-      if (!sameAsLocal) {
-        entries = visibleMerged;
+
+      // ---- GET ----
+      const remPriv = await githubGet(syncConfig);
+      const remShar = hasShared
+        ? await githubGet(syncConfig.shared)
+        : { entries: [], tasks: [], active: null, activeModified: null, sha: null };
+
+      // ---- Entries merge ----
+      const localById = new Map(entries.map(e => [e.id, e]));
+
+      // Tombstones für shared: Einträge die lokal den Kontext gewechselt haben (weg von SHARED_CONTEXT)
+      const tombsForShared = !hasShared ? [] : remShar.entries.filter(r => {
+        if (r.deleted) return false;
+        const loc = localById.get(r.id);
+        return loc && loc.context !== SHARED_CONTEXT && !loc.deleted &&
+          new Date(loc.modified) >= new Date(r.modified);
+      }).map(r => {
+        const loc = localById.get(r.id);
+        return { ...loc, deleted: true, modified: loc.modified };
+      });
+
+      // Tombstones für private: Einträge die lokal den Kontext gewechselt haben (zu SHARED_CONTEXT)
+      const tombsForPrivate = !hasShared ? [] : remPriv.entries.filter(r => {
+        if (r.deleted) return false;
+        const loc = localById.get(r.id);
+        return loc && loc.context === SHARED_CONTEXT && !loc.deleted &&
+          new Date(loc.modified) >= new Date(r.modified);
+      }).map(r => {
+        const loc = localById.get(r.id);
+        return { ...loc, deleted: true, modified: loc.modified };
+      });
+
+      const localPrivEntr = entries.filter(e => !hasShared || e.context !== SHARED_CONTEXT);
+      const localSharEntr = !hasShared ? [] : entries.filter(e => e.context === SHARED_CONTEXT);
+
+      const mergedPriv = mergeEntries([...localPrivEntr, ...tombsForPrivate], remPriv.entries);
+      const mergedShar = !hasShared ? [] : mergeEntries([...localSharEntr, ...tombsForShared], remShar.entries);
+
+      const allMergedEntr = [...mergedPriv, ...mergedShar];
+      const visAllEntr = visibleEntries(allMergedEntr);
+      if (!entriesEqual(visAllEntr, entries)) {
+        entries = visAllEntr;
         saveAll();
         refreshProjectList();
         if (currentScreen === 'list') renderList();
-        if (currentScreen === 'analysis') renderAnalysis();
+        if (currentScreen === 'analysis') { renderDayOverview(); renderAnalysis(); }
       }
-      const remoteTasks = remote.tasks || [];
-      const mergedTasks = mergeTasks(tasks.slice(), remoteTasks);
-      const sameTasksAsRemote = entriesEqual(mergedTasks, remoteTasks);
-      const visibleMergedTasks = visibleEntries(mergedTasks);
-      const sameTasksAsLocal = entriesEqual(visibleMergedTasks, tasks);
-      if (!sameTasksAsLocal) {
-        tasks = visibleMergedTasks;
+
+      // ---- Tasks merge ----
+      const taskById = new Map(tasks.map(t => [t.id, t]));
+
+      const tombsTasksForShared = !hasShared ? [] : (remShar.tasks || []).filter(r => {
+        if (r.deleted) return false;
+        const loc = taskById.get(r.id);
+        return loc && loc.context !== SHARED_CONTEXT && !loc.deleted &&
+          new Date(loc.modified) >= new Date(r.modified);
+      }).map(r => {
+        const loc = taskById.get(r.id);
+        return { ...loc, deleted: true, modified: loc.modified };
+      });
+
+      const tombsTasksForPrivate = !hasShared ? [] : (remPriv.tasks || []).filter(r => {
+        if (r.deleted) return false;
+        const loc = taskById.get(r.id);
+        return loc && loc.context === SHARED_CONTEXT && !loc.deleted &&
+          new Date(loc.modified) >= new Date(r.modified);
+      }).map(r => {
+        const loc = taskById.get(r.id);
+        return { ...loc, deleted: true, modified: loc.modified };
+      });
+
+      const localPrivTasks = tasks.filter(t => !hasShared || t.context !== SHARED_CONTEXT);
+      const localSharTasks = !hasShared ? [] : tasks.filter(t => t.context === SHARED_CONTEXT);
+
+      const mergedPrivTasks = mergeTasks([...localPrivTasks, ...tombsTasksForPrivate], remPriv.tasks || []);
+      const mergedSharTasks = !hasShared ? [] : mergeTasks([...localSharTasks, ...tombsTasksForShared], remShar.tasks || []);
+
+      const allMergedTasks = [...mergedPrivTasks, ...mergedSharTasks];
+      const visAllTasks = visibleEntries(allMergedTasks);
+      if (!entriesEqual(visAllTasks, tasks)) {
+        tasks = visAllTasks;
         saveTasks();
         if (currentScreen === 'tasks') renderTasks();
       }
-      // Active-Timer: Last-Write-Wins nach activeModified
-      const remoteIsNewer = remote.activeModified &&
-        (!activeModified || remote.activeModified > activeModified);
+
+      // ---- Active-Timer (nur private Datei) ----
+      const remoteIsNewer = remPriv.activeModified &&
+        (!activeModified || remPriv.activeModified > activeModified);
       if (remoteIsNewer) {
-        const changed = JSON.stringify(remote.active) !== JSON.stringify(active);
-        active = remote.active;
-        activeModified = remote.activeModified;
+        const changed = JSON.stringify(remPriv.active) !== JSON.stringify(active);
+        active = remPriv.active;
+        activeModified = remPriv.activeModified;
         if (changed) {
           saveAll();
           renderTimer();
@@ -1119,14 +1193,25 @@ async function syncNow({ force = false } = {}) {
         }
       }
       const sameActiveAsRemote =
-        JSON.stringify(active) === JSON.stringify(remote.active) &&
-        activeModified === remote.activeModified;
-      if (sameAsRemote && sameTasksAsRemote && sameActiveAsRemote && !force) {
+        JSON.stringify(active) === JSON.stringify(remPriv.active) &&
+        activeModified === remPriv.activeModified;
+
+      // ---- Skip-Check ----
+      const samePriv      = entriesEqual(mergedPriv, remPriv.entries);
+      const sameShar      = !hasShared || entriesEqual(mergedShar, remShar.entries);
+      const samePrivTasks = entriesEqual(mergedPrivTasks, remPriv.tasks || []);
+      const sameSharTasks = !hasShared || entriesEqual(mergedSharTasks, remShar.tasks || []);
+      if (samePriv && sameShar && samePrivTasks && sameSharTasks && sameActiveAsRemote && !force) {
         setSyncStatus('idle');
         return;
       }
+
+      // ---- PUT ----
       try {
-        await githubPut(merged, mergedTasks, active, activeModified, remote.sha);
+        if (!samePriv || !samePrivTasks || !sameActiveAsRemote)
+          await githubPut(syncConfig, mergedPriv, mergedPrivTasks, active, activeModified, remPriv.sha);
+        if (hasShared && (!sameShar || !sameSharTasks))
+          await githubPut(syncConfig.shared, mergedShar, mergedSharTasks, null, null, remShar.sha);
         setSyncStatus('idle');
         return;
       } catch (err) {
@@ -2144,6 +2229,7 @@ function transferToTimer(task) {
 // ---------- Arbeitsbereich / Workflow ----------
 
 const EXTENDED_CONTEXTS = ['spaz Verlag', 'VSPW'];
+const SHARED_CONTEXT = 'spaz Verlag';
 
 function isExtendedContext(ctx) {
   return EXTENDED_CONTEXTS.includes((ctx || '').trim());
@@ -2282,6 +2368,11 @@ function openSettings() {
     $('cfg-token').value = '';
     $('cfg-person').value = '';
   }
+  const sh = syncConfig && syncConfig.shared;
+  $('cfg-shared-owner').value = sh && sh.owner || '';
+  $('cfg-shared-repo').value  = sh && sh.repo  || 'spaz-verlag-data';
+  $('cfg-shared-path').value  = sh && sh.path  || 'data.json';
+  $('cfg-shared-token').value = sh && sh.token || '';
   $('cfg-result').textContent = '';
   $('cfg-result').className = '';
   $('settings-back').classList.add('show');
@@ -2300,8 +2391,16 @@ async function saveSettings() {
   }
   $('cfg-result').textContent = 'Verbinde…';
   $('cfg-result').className = '';
+  const shOwner = $('cfg-shared-owner').value.trim();
+  const shToken = $('cfg-shared-token').value.trim();
+  const shared = (shOwner && shToken) ? {
+    owner: shOwner,
+    repo:  $('cfg-shared-repo').value.trim() || 'spaz-verlag-data',
+    path:  $('cfg-shared-path').value.trim() || 'data.json',
+    token: shToken,
+  } : null;
   const previousConfig = syncConfig;
-  syncConfig = { owner, repo, path, token, person: $('cfg-person').value.trim() };
+  syncConfig = { owner, repo, path, token, person: $('cfg-person').value.trim(), shared };
   try {
     await syncNow({ force: false });
     if (syncStatus === 'error') {

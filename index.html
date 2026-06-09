@@ -39,6 +39,7 @@ body {
   display: flex;
   flex-direction: column;
   padding-top: env(safe-area-inset-top);
+  overflow-x: hidden;
 }
 header {
   display: flex;
@@ -97,14 +98,18 @@ nav {
 }
 nav button {
   flex: 1;
-  padding: 14px;
+  min-width: 0;
+  padding: 14px clamp(2px, 2vw, 14px);
   background: none;
   border: none;
   color: var(--text-dim);
-  font-size: 15px;
+  font-size: clamp(11px, 3.5vw, 15px);
   font-weight: 500;
   cursor: pointer;
   font-family: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 nav button.active { color: var(--accent); }
 
@@ -465,6 +470,20 @@ label:first-child { margin-top: 0; }
 
 @media (min-width: 600px) {
   header, main, nav { max-width: 640px; margin-left: auto; margin-right: auto; width: 100%; }
+  /* Timer-Formular kompakter: weniger Luft, damit auch mit AB+Workflow-Feldern kein Scroll nötig */
+  .timer-display { margin-top: 16px; margin-bottom: 10px; }
+  label { margin-top: 10px; }
+  textarea { min-height: 60px; }
+  /* Arbeitsbereich und Workflow nebeneinander */
+  .ctx-fields.show {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 12px;
+  }
+  .ctx-fields.show > label:first-child  { grid-area: 1 / 1; }
+  .ctx-fields.show > select:nth-child(2) { grid-area: 2 / 1; }
+  .ctx-fields.show > label:nth-child(3) { grid-area: 1 / 2; }
+  .ctx-fields.show > select:nth-child(4) { grid-area: 2 / 2; }
 }
 .sec-btn {
   display: block; width: 100%; margin-top: 10px;

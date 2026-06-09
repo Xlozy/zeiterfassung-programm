@@ -578,12 +578,9 @@ label:first-child { margin-top: 0; }
     <div class="list-controls">
       <select id="filter-context"><option value="">Alle Kontexte</option></select>
       <select id="filter-project"><option value="">Alle Projekte</option></select>
-      <select id="filter-person"><option value="">Alle Personen</option></select>
-      <input type="date" id="filter-date-from" title="Von" placeholder="Von">
-      <input type="date" id="filter-date-to" title="Bis" placeholder="Bis">
+      <select id="filter-person" style="display:none"><option value="">Alle Personen</option></select>
     </div>
     <div class="summary" id="summary"></div>
-    <div id="list-breakdown"></div>
     <div id="entries"></div>
     <div class="exports">
       <button id="btn-csv">CSV-Export</button>
@@ -595,6 +592,7 @@ label:first-child { margin-top: 0; }
     <div id="day-overview"></div>
     <div style="margin:16px 0;border-top:1px solid var(--border)"></div>
     <div class="range-presets">
+      <button data-preset="all">Alle</button>
       <button data-preset="7d">7 Tage</button>
       <button data-preset="30d">30 Tage</button>
       <button data-preset="week">Woche</button>
@@ -1308,25 +1306,17 @@ function renderList() {
   const contextFilter = $('filter-context').value;
   const projectFilter = $('filter-project').value;
   const personFilter  = $('filter-person').value;
-  const dateFrom = $('filter-date-from').value;
-  const dateTo = $('filter-date-to').value;
   const container = $('entries');
   const sorted = entries.slice().sort((a,b) => new Date(b.start) - new Date(a.start));
   const filtered = sorted.filter(e => {
     if (contextFilter && e.context !== contextFilter) return false;
     if (projectFilter && e.project !== projectFilter) return false;
     if (personFilter && e.person !== personFilter) return false;
-    if (dateFrom || dateTo) {
-      const eDate = new Date(e.start).toISOString().slice(0,10);
-      if (dateFrom && eDate < dateFrom) return false;
-      if (dateTo && eDate > dateTo) return false;
-    }
     return true;
   });
   let totalMs = 0;
   filtered.forEach(e => { if (e.stop) totalMs += new Date(e.stop) - new Date(e.start); });
   $('summary').innerHTML = `<span>${filtered.length} Eintr${filtered.length === 1 ? 'ag' : 'äge'}</span><strong>${formatDuration(totalMs)}</strong>`;
-  renderListBreakdown(filtered);
   if (filtered.length === 0) {
     container.innerHTML = '<div class="empty">Keine Einträge.</div>';
     return;
@@ -1814,7 +1804,9 @@ function getAnalysisRange() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   let from = null, to = null;
-  if (analysis.preset === '7d') {
+  if (analysis.preset === 'all') {
+    return { from: null, to: null, all: true };
+  } else if (analysis.preset === '7d') {
     to = new Date(today);
     from = new Date(today); from.setDate(from.getDate() - 6);
   } else if (analysis.preset === '30d') {
@@ -1866,6 +1858,8 @@ function renderAnalysis() {
     b.classList.toggle('active', b.dataset.preset === analysis.preset);
   });
   $('range-custom').classList.toggle('show', analysis.preset === 'custom');
+  $('analysis-columns').style.display = analysis.preset === 'all' ? 'none' : '';
+  $('col-add-form').style.display = analysis.preset === 'all' ? 'none' : '';
   if ($('range-from').value !== (analysis.customFrom || '')) $('range-from').value = analysis.customFrom || '';
   if ($('range-to').value !== (analysis.customTo || '')) $('range-to').value = analysis.customTo || '';
 
@@ -1885,11 +1879,44 @@ function renderAnalysis() {
 
   // Tabelle
   const wrap = $('analysis-table');
+  const { from, to, all } = getAnalysisRange();
+
+  if (all) {
+    // Aufschlüsselung aller Stunden nach Kontext, dann Projekt
+    const byCtx = new Map();
+    entries.forEach(e => {
+      if (!e.stop) return;
+      const ctx = e.context || '(ohne Kontext)';
+      const dur = new Date(e.stop) - new Date(e.start);
+      if (!byCtx.has(ctx)) byCtx.set(ctx, { total: 0, projects: new Map() });
+      const c = byCtx.get(ctx);
+      c.total += dur;
+      if (e.project) c.projects.set(e.project, (c.projects.get(e.project) || 0) + dur);
+    });
+    if (byCtx.size === 0) {
+      wrap.innerHTML = '<div class="analysis-empty">Keine Einträge vorhanden.</div>';
+      return;
+    }
+    const ctxRows = Array.from(byCtx.entries()).sort((a, b) => b[1].total - a[1].total);
+    let html = '<div style="display:flex;flex-direction:column;gap:10px">';
+    ctxRows.forEach(([ctx, data]) => {
+      html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 14px">`;
+      html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0${data.projects.size > 0 ? ';border-bottom:1px solid var(--border)' : ''}"><span style="color:#a78bfa;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">${escapeHtml(ctx)}</span><span style="color:var(--text);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums">${formatHM(data.total)}</span></div>`;
+      const prjRows = Array.from(data.projects.entries()).sort((a, b) => b[1] - a[1]);
+      prjRows.forEach(([prj, ms], i) => {
+        const border = i < prjRows.length - 1 ? ';border-bottom:1px solid var(--border)' : '';
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0 4px 12px${border}"><span style="color:var(--accent);font-size:11px">${escapeHtml(prj)}</span><span style="color:var(--text-dim);font-size:13px;font-variant-numeric:tabular-nums">${formatHM(ms)}</span></div>`;
+      });
+      html += '</div>';
+    });
+    wrap.innerHTML = html + '</div>';
+    return;
+  }
+
   if (analysis.columns.length === 0) {
     wrap.innerHTML = '<div class="analysis-empty">Füge mit „+ Spalte" eine Vergleichseinheit hinzu (Kontext, Projekt und/oder Stichwort).</div>';
     return;
   }
-  const { from, to } = getAnalysisRange();
   if (!from || !to) {
     wrap.innerHTML = '<div class="analysis-empty">Wähle einen Zeitraum.</div>';
     return;
@@ -2527,11 +2554,14 @@ $('range-to').addEventListener('change', () => {
 });
 $('col-add-cancel').addEventListener('click', closeColAddForm);
 $('col-add-submit').addEventListener('click', submitColAdd);
-$('filter-context').addEventListener('change', renderList);
+$('filter-context').addEventListener('change', () => {
+  const isShared = $('filter-context').value === SHARED_CONTEXT;
+  $('filter-person').style.display = isShared ? '' : 'none';
+  if (!isShared) $('filter-person').value = '';
+  renderList();
+});
 $('filter-project').addEventListener('change', renderList);
 $('filter-person').addEventListener('change', renderList);
-$('filter-date-from').addEventListener('change', renderList);
-$('filter-date-to').addEventListener('change', renderList);
 $('btn-csv').addEventListener('click', exportCSV);
 $('btn-projects').addEventListener('click', openProjects);
 $('projects-close').addEventListener('click', closeProjects);

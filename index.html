@@ -22,6 +22,8 @@
   --accent: #4ade80;
   --warn: #f59e0b;
   --danger: #ef4444;
+  --orange: #fb923c;
+  --blue: #60a5fa;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
@@ -230,6 +232,7 @@ label:first-child { margin-top: 0; }
 }
 .entry-meta .ctx { color: #a78bfa; }
 .entry-meta .prj { color: var(--accent); }
+.entry-meta .ab  { color: var(--blue); }
 .entry-meta .sep { color: var(--text-dim); font-weight: 400; margin: 0 4px; }
 .entry-intent { font-size: 15px; color: var(--text); margin-bottom: 4px; line-height: 1.35; }
 .entry-result { font-size: 13px; color: var(--text-dim); line-height: 1.35; }
@@ -463,6 +466,61 @@ label:first-child { margin-top: 0; }
 @media (min-width: 600px) {
   header, main, nav { max-width: 640px; margin-left: auto; margin-right: auto; width: 100%; }
 }
+.sec-btn {
+  display: block; width: 100%; margin-top: 10px;
+  padding: 13px; font-size: 15px; font-weight: 500;
+  border: 1px solid var(--border); border-radius: 12px;
+  cursor: pointer; font-family: inherit;
+  background: var(--surface); color: var(--text-dim);
+  transition: transform 0.05s;
+}
+.sec-btn:active { transform: scale(0.98); }
+.kind-badge {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--text-dim); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 5px; margin-left: 6px;
+  vertical-align: middle;
+}
+.ctx-fields { display: none; }
+.ctx-fields.show { display: block; }
+/* Aufgaben */
+.task-item {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
+}
+.task-item:active { background: var(--surface-2); }
+.task-offen        { border-left: 3px solid var(--text-dim); }
+.task-laeuft       { border-left: 3px solid var(--accent); }
+
+.task-abgeschlossen{ border-left: 3px solid var(--border); opacity: 0.65; }
+.task-status-badge {
+  display: inline-block; font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.4px;
+  border-radius: 4px; padding: 2px 6px; vertical-align: middle; margin-right: 4px;
+}
+.badge-offen         { color: var(--text-dim); background: var(--surface-2); border: 1px solid var(--border); }
+.badge-laeuft        { color: #000; background: var(--accent); }
+
+.badge-abgeschlossen { color: var(--text-dim); background: var(--surface-2); border: 1px solid var(--border); }
+.task-transfer-btn {
+  display: block; width: 100%; margin-top: 10px;
+  padding: 8px; font-size: 13px; font-weight: 500;
+  border: 1px solid var(--border); border-radius: 8px;
+  cursor: pointer; font-family: inherit;
+  background: var(--surface-2); color: var(--text-dim);
+  text-align: center; transition: transform 0.05s;
+}
+.task-transfer-btn:active { transform: scale(0.98); }
+.day-block {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.day-block:last-child { border-bottom: none; }
+.day-block-time { color: var(--text-dim); font-size: 12px; min-width: 96px; flex-shrink: 0; padding-top: 2px; }
+.day-block-meta { flex: 1; min-width: 0; }
+.day-block-dur { color: var(--text); font-size: 13px; font-weight: 600; flex-shrink: 0; padding-top: 2px; }
 </style>
 </head>
 <body>
@@ -483,14 +541,28 @@ label:first-child { margin-top: 0; }
       <input type="text" id="context" list="contexts" autocomplete="off" placeholder="z. B. LJVW">
       <datalist id="contexts"></datalist>
       <label for="project">Projekt (optional)</label>
-      <input type="text" id="project" list="projects" autocomplete="off" placeholder="z. B. Website">
+      <div class="suggest-wrap">
+        <input type="text" id="project" list="projects" autocomplete="off" placeholder="z. B. Website">
+        <div class="suggestions" id="project-suggestions"></div>
+      </div>
       <datalist id="projects"></datalist>
-      <label for="intent">Was hast du vor?</label>
+      <div id="ctx-fields" class="ctx-fields">
+        <label for="arbeitsbereich">Arbeitsbereich</label>
+        <select id="arbeitsbereich" autocomplete="off">
+          <option value="">— keiner —</option>
+        </select>
+        <label for="workflow">Workflow</label>
+        <select id="workflow" autocomplete="off">
+          <option value="">— keiner —</option>
+        </select>
+      </div>
+      <label for="intent">Was hast du vor? <span style="color:var(--accent)">(obligatorisch)</span></label>
       <div class="suggest-wrap">
         <textarea id="intent" placeholder="Kurz beschreiben, worauf du dich fokussierst"></textarea>
         <div class="suggestions" id="intent-suggestions"></div>
       </div>
       <button class="big-btn start" id="btn-start" disabled>Start</button>
+      <button class="sec-btn" id="btn-nachtrag" type="button">Nachtrag</button>
     </div>
     <div id="timer-running-form" style="display:none">
       <label for="result">Was hast du gemacht? <span style="color:var(--text-dim)">(kann leer bleiben)</span></label>
@@ -506,10 +578,12 @@ label:first-child { margin-top: 0; }
     <div class="list-controls">
       <select id="filter-context"><option value="">Alle Kontexte</option></select>
       <select id="filter-project"><option value="">Alle Projekte</option></select>
+      <select id="filter-person"><option value="">Alle Personen</option></select>
       <input type="date" id="filter-date-from" title="Von" placeholder="Von">
       <input type="date" id="filter-date-to" title="Bis" placeholder="Bis">
     </div>
     <div class="summary" id="summary"></div>
+    <div id="list-breakdown"></div>
     <div id="entries"></div>
     <div class="exports">
       <button id="btn-csv">CSV-Export</button>
@@ -518,6 +592,8 @@ label:first-child { margin-top: 0; }
   </section>
 
   <section id="screen-analysis" style="display:none">
+    <div id="day-overview"></div>
+    <div style="margin:16px 0;border-top:1px solid var(--border)"></div>
     <div class="range-presets">
       <button data-preset="7d">7 Tage</button>
       <button data-preset="30d">30 Tage</button>
@@ -544,12 +620,29 @@ label:first-child { margin-top: 0; }
     </div>
     <div class="analysis-table-wrap" id="analysis-table"></div>
   </section>
+
+  <section id="screen-tasks" style="display:none">
+    <div class="list-controls">
+      <select id="task-filter-context"><option value="">Alle Kontexte</option></select>
+      <select id="task-filter-project"><option value="">Alle Projekte</option></select>
+      <select id="task-filter-status">
+        <option value="">Alle Status</option>
+        <option value="offen">Offen</option>
+        <option value="läuft">Läuft</option>
+        <option value="abgeschlossen">Abgeschlossen</option>
+      </select>
+      <select id="task-filter-person"><option value="">Alle Personen</option></select>
+    </div>
+    <div id="tasks-list"></div>
+    <button class="sec-btn" id="btn-task-new" style="margin-top:12px">+ Neue Aufgabe</button>
+  </section>
 </main>
 
 <nav>
   <button id="tab-timer" class="active">Zeiterfassung</button>
   <button id="tab-list">Übersicht</button>
   <button id="tab-analysis">Analyse</button>
+  <button id="tab-tasks">Aufgaben</button>
 </nav>
 
 <div class="modal-back" id="modal-back">
@@ -559,6 +652,16 @@ label:first-child { margin-top: 0; }
     <input type="text" id="edit-context">
     <label>Projekt</label>
     <input type="text" id="edit-project">
+    <div id="edit-ctx-fields" class="ctx-fields">
+      <label>Arbeitsbereich</label>
+      <select id="edit-arbeitsbereich" autocomplete="off">
+        <option value="">— keiner —</option>
+      </select>
+      <label>Workflow</label>
+      <select id="edit-workflow" autocomplete="off">
+        <option value="">— keiner —</option>
+      </select>
+    </div>
     <label>Absicht</label>
     <textarea id="edit-intent"></textarea>
     <label>Ergebnis</label>
@@ -590,6 +693,8 @@ label:first-child { margin-top: 0; }
     <input type="text" id="cfg-path" autocomplete="off" autocapitalize="off" value="data.json">
     <label>Personal Access Token</label>
     <input type="password" id="cfg-token" autocomplete="off" placeholder="github_pat_…">
+    <label>Mein Kürzel</label>
+    <input type="text" id="cfg-person" autocomplete="off" placeholder="z. B. lw" maxlength="10">
     <div id="cfg-result"></div>
     <div class="modal-buttons">
       <button class="cancel" id="cfg-cancel">Abbrechen</button>
@@ -615,6 +720,76 @@ label:first-child { margin-top: 0; }
   </div>
 </div>
 
+<div class="modal-back" id="task-modal-back">
+  <div class="modal">
+    <h2 id="task-modal-title">Neue Aufgabe</h2>
+    <label for="task-context">Kontext (optional)</label>
+    <input type="text" id="task-context" list="contexts" autocomplete="off" placeholder="z. B. spaz Verlag">
+    <label for="task-project">Projekt (optional)</label>
+    <input type="text" id="task-project" autocomplete="off" placeholder="z. B. Website">
+    <div id="task-ctx-fields" class="ctx-fields">
+      <label for="task-arbeitsbereich">Arbeitsbereich</label>
+      <select id="task-arbeitsbereich" autocomplete="off">
+        <option value="">— keiner —</option>
+      </select>
+      <label for="task-workflow">Workflow</label>
+      <select id="task-workflow" autocomplete="off">
+        <option value="">— keiner —</option>
+      </select>
+    </div>
+    <label for="task-intent">Was zu tun ist <span style="color:var(--accent)">(obligatorisch)</span></label>
+    <textarea id="task-intent" placeholder="Aufgabe beschreiben"></textarea>
+    <label for="task-zustaendig">Zuständig</label>
+    <input type="text" id="task-zustaendig" autocomplete="off" placeholder="Kürzel, z. B. AB">
+    <label for="task-faellig">Fällig</label>
+    <input type="date" id="task-faellig">
+    <label for="task-status">Status</label>
+    <select id="task-status">
+      <option value="offen">Offen</option>
+      <option value="läuft">Läuft</option>
+      <option value="abgeschlossen">Abgeschlossen</option>
+    </select>
+    <button class="sec-btn" id="btn-task-transfer-modal" style="display:none">→ In Zeiterfassung übernehmen</button>
+    <div class="modal-buttons">
+      <button class="cancel" id="task-cancel">Abbrechen</button>
+      <button class="delete" id="task-delete" style="display:none">Löschen</button>
+      <button class="save" id="task-save">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-back" id="nachtrag-back">
+  <div class="modal">
+    <h2>Nachtrag</h2>
+    <label>Startzeit</label>
+    <input type="datetime-local" id="nachtrag-start">
+    <label>Stoppzeit</label>
+    <input type="datetime-local" id="nachtrag-stop">
+    <label>Kontext (optional)</label>
+    <input type="text" id="nachtrag-context" list="contexts" autocomplete="off" placeholder="z. B. spaz Verlag">
+    <label>Projekt (optional)</label>
+    <input type="text" id="nachtrag-project" autocomplete="off" placeholder="z. B. Website">
+    <div id="nachtrag-ctx-fields" class="ctx-fields">
+      <label>Arbeitsbereich</label>
+      <select id="nachtrag-arbeitsbereich" autocomplete="off">
+        <option value="">— keiner —</option>
+      </select>
+      <label>Workflow</label>
+      <select id="nachtrag-workflow" autocomplete="off">
+        <option value="">— keiner —</option>
+      </select>
+    </div>
+    <label for="nachtrag-intent">Was hast du vor? <span style="color:var(--accent)">(obligatorisch)</span></label>
+    <textarea id="nachtrag-intent" placeholder="Kurz beschreiben, was du gemacht hast"></textarea>
+    <label>Was hast du gemacht? <span style="color:var(--text-dim)">(optional)</span></label>
+    <textarea id="nachtrag-result" placeholder="Kurz festhalten, was du erreicht hast"></textarea>
+    <div class="modal-buttons">
+      <button class="cancel" id="nachtrag-cancel">Abbrechen</button>
+      <button class="save" id="nachtrag-save">Speichern</button>
+    </div>
+  </div>
+</div>
+
 <script>
 'use strict';
 
@@ -622,7 +797,67 @@ const STORAGE_KEY = 'zeiterfassung_v1';
 const ACTIVE_KEY = 'zeiterfassung_active_v1';
 const CONFIG_KEY = 'zeiterfassung_config_v1';
 const ANALYSIS_KEY = 'zeiterfassung_analysis_v1';
+const WORKFLOWS_KEY = 'zeiterfassung_workflows_v1';
+const TASKS_KEY = 'zeiterfassung_tasks_v1';
+const ACTIVE_MOD_KEY = 'zeiterfassung_activemod_v1';
 const SYNC_INTERVAL_MS = 60000;
+
+const DEFAULT_WORKFLOWS = {
+  "000 Admin": [
+    "Strategie- und Programmplanung",
+    "Halbjahres-Klausur",
+    "Wöchentliche Kurzbesprechung",
+    "Vereins-Administration (GV, Vorstand)"
+  ],
+  "010 Werke": [],
+  "020 Textbeschaffung": [
+    "Eigene Texte schreiben/adaptieren",
+    "Schreibaufträge an Dritte",
+    "Scouting / Diskurs verfolgen"
+  ],
+  "030 Textbearbeitung": [
+    "Lektorat",
+    "Korrektorat",
+    "Übersetzung / Sprachanpassung"
+  ],
+  "040 Publikation & Produktion": [
+    "Buchkonzept entwickeln",
+    "Druckerei-Offerten, Materialrecherche",
+    "Schriftsatz, Layout, Gestaltung"
+  ],
+  "050 Veranstaltungen": [
+    "Veranstaltungs-Organisation",
+    "Performer:innen-Pool koordinieren"
+  ],
+  "060 Fundraising": [
+    "Stiftungs-Datenbank pflegen",
+    "Fördergesuche schreiben/einreichen",
+    "Stiftungs-Beziehungspflege",
+    "Freundeskreis aufbauen / pflegen"
+  ],
+  "070 Kommunikation": [
+    "Website-Pflege (gehstueck.ch)",
+    "Veranstaltungs-Kommunikation",
+    "Pressekontakte aktiv pflegen",
+    "Social Media (selektiv)",
+    "Anfragen Dritter bearbeiten"
+  ],
+  "080 Verkauf & Vertrieb": [
+    "Buchhandelskontakte (Basel)",
+    "VLB-Katalog pflegen",
+    "Direktverkauf, Versand"
+  ],
+  "090 Finanzen": [
+    "Buchhaltung laufend",
+    "Budget pflegen, Quartalsabgleich",
+    "Jahresrechnung erstellen",
+    "Verwendungsnachweise Förderer"
+  ],
+  "100 Gattungsentwicklung": [
+    "Theoriearbeit (Manifest, Paragrafen)",
+    "Dokumentation Gehstücke"
+  ]
+};
 
 let entries = [];
 let active = null;
@@ -634,6 +869,10 @@ let syncPollTimer = null;
 let syncInFlight = false;
 let currentScreen = 'timer';
 let analysis = { columns: [], preset: '7d', customFrom: '', customTo: '' };
+let workflows = {};
+let tasks = [];
+let editingTaskId = null;
+let activeModified = null;
 
 try {
   entries = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
@@ -644,6 +883,14 @@ try {
     analysis = Object.assign(analysis, storedAnalysis);
     if (!Array.isArray(analysis.columns)) analysis.columns = [];
   }
+  const storedWorkflows = JSON.parse(localStorage.getItem(WORKFLOWS_KEY) || 'null');
+  workflows = (storedWorkflows && typeof storedWorkflows === 'object' && !Array.isArray(storedWorkflows))
+    ? storedWorkflows
+    : JSON.parse(JSON.stringify(DEFAULT_WORKFLOWS));
+  tasks = JSON.parse(localStorage.getItem(TASKS_KEY) || '[]');
+  if (!Array.isArray(tasks)) tasks = [];
+  activeModified = localStorage.getItem(ACTIVE_MOD_KEY) || null;
+  if (active && !activeModified) activeModified = active.start;
 } catch (e) { console.error('Speicher lesen fehlgeschlagen', e); }
 
 let migrated = false;
@@ -660,6 +907,8 @@ function saveAll() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
     localStorage.setItem(ACTIVE_KEY, JSON.stringify(active));
+    if (activeModified) localStorage.setItem(ACTIVE_MOD_KEY, activeModified);
+    else localStorage.removeItem(ACTIVE_MOD_KEY);
   } catch (e) {
     alert('Speichern fehlgeschlagen: ' + e.message);
   }
@@ -670,6 +919,12 @@ function saveConfig() {
 }
 function saveAnalysis() {
   try { localStorage.setItem(ANALYSIS_KEY, JSON.stringify(analysis)); } catch (e) {}
+}
+function saveWorkflows() {
+  try { localStorage.setItem(WORKFLOWS_KEY, JSON.stringify(workflows)); } catch (e) {}
+}
+function saveTasks() {
+  try { localStorage.setItem(TASKS_KEY, JSON.stringify(tasks)); } catch (e) {}
 }
 
 function formatDuration(ms) {
@@ -688,6 +943,11 @@ function formatTime(iso) {
 function formatTimeFull(iso) {
   const d = new Date(iso);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+function formatLocalDate(dateStr) {
+  if (!dateStr) return '—';
+  const [y, m, d] = dateStr.split('-');
+  return `${d}.${m}.${y}`;
 }
 function escapeHtml(s) {
   return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -725,7 +985,7 @@ async function githubGet() {
     },
     cache: 'no-store'
   });
-  if (r.status === 404) return { entries: [], sha: null };
+  if (r.status === 404) return { entries: [], tasks: [], sha: null };
   if (!r.ok) {
     const t = await r.text();
     throw new Error(`GET ${r.status}: ${t.slice(0,200)}`);
@@ -734,15 +994,21 @@ async function githubGet() {
   const text = base64ToUtf8(data.content);
   let parsed;
   try { parsed = JSON.parse(text); } catch (e) { throw new Error('Daten-Datei nicht lesbar (kein JSON)'); }
-  return { entries: Array.isArray(parsed.entries) ? parsed.entries : [], sha: data.sha };
+  return {
+    entries:        Array.isArray(parsed.entries) ? parsed.entries : [],
+    tasks:          Array.isArray(parsed.tasks)   ? parsed.tasks   : [],
+    active:         parsed.active         !== undefined ? parsed.active         : null,
+    activeModified: parsed.activeModified !== undefined ? parsed.activeModified : null,
+    sha: data.sha
+  };
 }
 
-async function githubPut(allEntries, sha) {
+async function githubPut(allEntries, allTasks, activeObj, activeModStr, sha) {
   const { token, owner, repo, path } = syncConfig;
   const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
   const body = {
     message: `Sync ${new Date().toISOString()}`,
-    content: utf8ToBase64(JSON.stringify({ version: 1, updated: nowIso(), entries: allEntries }, null, 2)),
+    content: utf8ToBase64(JSON.stringify({ version: 1, updated: nowIso(), entries: allEntries, tasks: allTasks, active: activeObj, activeModified: activeModStr }, null, 2)),
   };
   if (sha) body.sha = sha;
   const r = await fetch(url, {
@@ -763,6 +1029,19 @@ async function githubPut(allEntries, sha) {
   }
   const data = await r.json();
   return data.content.sha;
+}
+
+function mergeTasks(local, remote) {
+  const map = new Map();
+  remote.forEach(t => map.set(t.id, t));
+  local.forEach(t => {
+    const existing = map.get(t.id);
+    if (!existing) { map.set(t.id, t); return; }
+    const tLocal  = new Date(t.modified).getTime();
+    const tRemote = new Date(existing.modified).getTime();
+    if (tLocal >= tRemote) map.set(t.id, t);
+  });
+  return Array.from(map.values());
 }
 
 function mergeEntries(local, remote) {
@@ -816,12 +1095,38 @@ async function syncNow({ force = false } = {}) {
         if (currentScreen === 'list') renderList();
         if (currentScreen === 'analysis') renderAnalysis();
       }
-      if (sameAsRemote && !force) {
+      const remoteTasks = remote.tasks || [];
+      const mergedTasks = mergeTasks(tasks.slice(), remoteTasks);
+      const sameTasksAsRemote = entriesEqual(mergedTasks, remoteTasks);
+      const visibleMergedTasks = visibleEntries(mergedTasks);
+      const sameTasksAsLocal = entriesEqual(visibleMergedTasks, tasks);
+      if (!sameTasksAsLocal) {
+        tasks = visibleMergedTasks;
+        saveTasks();
+        if (currentScreen === 'tasks') renderTasks();
+      }
+      // Active-Timer: Last-Write-Wins nach activeModified
+      const remoteIsNewer = remote.activeModified &&
+        (!activeModified || remote.activeModified > activeModified);
+      if (remoteIsNewer) {
+        const changed = JSON.stringify(remote.active) !== JSON.stringify(active);
+        active = remote.active;
+        activeModified = remote.activeModified;
+        if (changed) {
+          saveAll();
+          renderTimer();
+          if (active) startTicking(); else stopTicking();
+        }
+      }
+      const sameActiveAsRemote =
+        JSON.stringify(active) === JSON.stringify(remote.active) &&
+        activeModified === remote.activeModified;
+      if (sameAsRemote && sameTasksAsRemote && sameActiveAsRemote && !force) {
         setSyncStatus('idle');
         return;
       }
       try {
-        await githubPut(merged, remote.sha);
+        await githubPut(merged, mergedTasks, active, activeModified, remote.sha);
         setSyncStatus('idle');
         return;
       } catch (err) {
@@ -860,6 +1165,10 @@ function renderTimer() {
     if (active.context) parts.push(`<span class="ctx">${escapeHtml(active.context)}</span>`);
     if (active.project) parts.push(escapeHtml(active.project));
     if (parts.length) html += `<strong>${parts.join('<span class="sep">·</span>')}</strong>`;
+    const abParts = [];
+    if (active.arbeitsbereich) abParts.push(`<span class="ab">${escapeHtml(active.arbeitsbereich)}</span>`);
+    if (active.workflow) abParts.push(`<span class="ab">${escapeHtml(active.workflow)}</span>`);
+    if (abParts.length) html += `<div class="entry-meta" style="text-align:center;margin-bottom:4px">${abParts.join('<span class="sep">·</span>')}</div>`;
     html += escapeHtml(active.intent);
     info.innerHTML = html;
   } else {
@@ -901,10 +1210,19 @@ function refreshProjectList() {
   const cCurrent = cSel.value;
   cSel.innerHTML = '<option value="">Alle Kontexte</option>' + cList.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
   cSel.value = cCurrent;
+  // Personen
+  const personSet = new Set();
+  entries.forEach(e => { if (e.person) personSet.add(e.person); });
+  const personList = Array.from(personSet).sort((a,b) => a.localeCompare(b, 'de'));
+  const personSel = $('filter-person');
+  const personCurrent = personSel.value;
+  personSel.innerHTML = '<option value="">Alle Personen</option>' + personList.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+  personSel.value = personCurrent;
 }
 function renderList() {
   const contextFilter = $('filter-context').value;
   const projectFilter = $('filter-project').value;
+  const personFilter  = $('filter-person').value;
   const dateFrom = $('filter-date-from').value;
   const dateTo = $('filter-date-to').value;
   const container = $('entries');
@@ -912,6 +1230,7 @@ function renderList() {
   const filtered = sorted.filter(e => {
     if (contextFilter && e.context !== contextFilter) return false;
     if (projectFilter && e.project !== projectFilter) return false;
+    if (personFilter && e.person !== personFilter) return false;
     if (dateFrom || dateTo) {
       const eDate = new Date(e.start).toISOString().slice(0,10);
       if (dateFrom && eDate < dateFrom) return false;
@@ -922,23 +1241,32 @@ function renderList() {
   let totalMs = 0;
   filtered.forEach(e => { if (e.stop) totalMs += new Date(e.stop) - new Date(e.start); });
   $('summary').innerHTML = `<span>${filtered.length} Eintr${filtered.length === 1 ? 'ag' : 'äge'}</span><strong>${formatDuration(totalMs)}</strong>`;
+  renderListBreakdown(filtered);
   if (filtered.length === 0) {
     container.innerHTML = '<div class="empty">Keine Einträge.</div>';
     return;
   }
+  const kindLabels = { nachtrag: 'Nachtrag', korrigiert: 'korrigiert' };
   container.innerHTML = filtered.map(e => {
     const dur = e.stop ? (new Date(e.stop) - new Date(e.start)) : 0;
     const incomplete = !e.result || e.result.trim() === '';
+    const kind = e.kind || 'normal';
+    const kindBadge = kind !== 'normal'
+      ? `<span class="kind-badge">${escapeHtml(kindLabels[kind] || kind)}</span>` : '';
     const metaParts = [];
     if (e.context) metaParts.push(`<span class="ctx">${escapeHtml(e.context)}</span>`);
     if (e.project) metaParts.push(`<span class="prj">${escapeHtml(e.project)}</span>`);
     const meta = metaParts.length ? `<div class="entry-meta">${metaParts.join('<span class="sep">·</span>')}</div>` : '';
+    const abParts = [];
+    if (e.arbeitsbereich) abParts.push(`<span class="ab">${escapeHtml(e.arbeitsbereich)}</span>`);
+    if (e.workflow) abParts.push(`<span class="ab">${escapeHtml(e.workflow)}</span>`);
+    const metaAb = abParts.length ? `<div class="entry-meta">${abParts.join('<span class="sep">·</span>')}</div>` : '';
     return `<div class="entry ${incomplete ? 'incomplete' : ''}" data-id="${e.id}">
       <div class="entry-head">
-        <span>${formatDate(e.start)} · ${formatTime(e.start)}–${e.stop ? formatTime(e.stop) : '…'}</span>
+        <span>${formatDate(e.start)} · ${formatTime(e.start)}–${e.stop ? formatTime(e.stop) : '…'}${kindBadge}</span>
         <span class="entry-duration">${formatDuration(dur)}</span>
       </div>
-      ${meta}
+      ${meta}${metaAb}
       <div class="entry-intent">${escapeHtml(e.intent) || '<em style="color:var(--text-dim)">(keine Absicht)</em>'}</div>
       ${e.result ? `<div class="entry-result">→ ${escapeHtml(e.result)}</div>` : '<div class="entry-result" style="font-style:italic">→ noch nicht festgehalten</div>'}
     </div>`;
@@ -952,36 +1280,50 @@ function switchScreen(name) {
   $('screen-timer').style.display = name === 'timer' ? 'block' : 'none';
   $('screen-list').style.display = name === 'list' ? 'block' : 'none';
   $('screen-analysis').style.display = name === 'analysis' ? 'block' : 'none';
+  $('screen-tasks').style.display = name === 'tasks' ? 'block' : 'none';
   $('tab-timer').classList.toggle('active', name === 'timer');
   $('tab-list').classList.toggle('active', name === 'list');
   $('tab-analysis').classList.toggle('active', name === 'analysis');
+  $('tab-tasks').classList.toggle('active', name === 'tasks');
   if (name === 'list') {
     refreshProjectList();
     renderList();
   }
   if (name === 'analysis') {
     closeColAddForm();
+    renderDayOverview();
     renderAnalysis();
   }
+  if (name === 'tasks') renderTasks();
 }
 function start() {
   const intent = $('intent').value.trim();
   if (!intent) return;
+  const ab = $('arbeitsbereich').value;
+  const wf = $('workflow').value;
   active = {
     id: uid(),
     context: $('context').value.trim(),
     project: $('project').value.trim(),
+    arbeitsbereich: ab,
+    workflow: wf,
     intent,
     start: nowIso(),
+    person: syncConfig?.person || '',
   };
+  activeModified = nowIso();
   saveAll();
   $('context').value = '';
   $('project').value = '';
+  $('arbeitsbereich').value = '';
+  $('workflow').value = '';
+  showExtendedFields('ctx-fields', '');
   $('intent').value = '';
   $('result').value = '';
   updateStartButton();
   renderTimer();
   startTicking();
+  syncNow();
 }
 function stop() {
   if (!active) return;
@@ -992,6 +1334,7 @@ function stop() {
     modified: nowIso(),
   });
   active = null;
+  activeModified = nowIso();
   saveAll();
   $('result').value = '';
   renderTimer();
@@ -1010,6 +1353,11 @@ function openEdit(id) {
   editingId = id;
   $('edit-context').value = entry.context || '';
   $('edit-project').value = entry.project || '';
+  populateArbeitsbereichSelect('edit-arbeitsbereich');
+  $('edit-arbeitsbereich').value = entry.arbeitsbereich || '';
+  updateWorkflowSelect('edit-arbeitsbereich', 'edit-workflow');
+  $('edit-workflow').value = entry.workflow || '';
+  showExtendedFields('edit-ctx-fields', entry.context || '');
   $('edit-intent').value = entry.intent || '';
   $('edit-result').value = entry.result || '';
   $('edit-start').value = toLocalInput(entry.start);
@@ -1022,12 +1370,22 @@ function saveEdit() {
   if (!entry) return;
   entry.context = $('edit-context').value.trim();
   entry.project = $('edit-project').value.trim();
+  entry.arbeitsbereich = $('edit-arbeitsbereich').value;
+  entry.workflow = $('edit-workflow').value;
   entry.intent = $('edit-intent').value.trim();
   entry.result = $('edit-result').value.trim();
-  const newStart = fromLocalInput($('edit-start').value);
-  const newStop = fromLocalInput($('edit-stop').value);
+  const origStartLocal = toLocalInput(entry.start);
+  const origStopLocal  = toLocalInput(entry.stop);
+  const newStartLocal  = $('edit-start').value;
+  const newStopLocal   = $('edit-stop').value;
+  const newStart = fromLocalInput(newStartLocal);
+  const newStop  = fromLocalInput(newStopLocal);
   if (newStart) entry.start = newStart;
-  if (newStop) entry.stop = newStop;
+  if (newStop)  entry.stop  = newStop;
+  if ((newStartLocal && newStartLocal !== origStartLocal) ||
+      (newStopLocal  && newStopLocal  !== origStopLocal)) {
+    if ((entry.kind || 'normal') === 'normal') entry.kind = 'nachtrag';
+  }
   entry.modified = nowIso();
   saveAll();
   refreshProjectList();
@@ -1085,15 +1443,47 @@ function downloadBlob(content, filename, type) {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-// ---------- Suggestions (Absicht / Ergebnis) ----------
+// ---------- Suggestions (intelligent, kontextbezogen) ----------
+//
+// Vorschläge richten sich nach dem aktuell eingegebenen Kontext und Projekt:
+// Werte aus Einträgen mit demselben Kontext+Projekt werden am höchsten
+// gewichtet, dann gleicher Kontext, dann der Rest. So führt z. B.
+// Kontext „Literatur" → Projekt „TEXT BQM" zu passenden „Was hast du vor?"-
+// Vorschlägen, die zu genau dieser Kombination gehören.
 
-function buildSuggestionPool(field) {
-  const set = new Set();
+// Liest den aktuell eingegebenen Kontext/Projekt aus dem Idle-Formular.
+function currentInputContext() {
+  return {
+    context: ($('context') ? $('context').value.trim() : ''),
+    project: ($('project') ? $('project').value.trim() : ''),
+  };
+}
+
+// Baut eine nach Relevanz und Aktualität sortierte Vorschlagsliste für ein
+// Feld ('intent' oder 'result'), gewichtet nach passendem Kontext/Projekt.
+function rankedSuggestions(field, ctx) {
+  const ctxL = (ctx.context || '').toLowerCase();
+  const prjL = (ctx.project || '').toLowerCase();
+  // Pro Wert das beste (höchste) Gewicht und die jüngste Verwendung merken.
+  const best = new Map(); // value -> { weight, time }
   entries.forEach(e => {
     const v = e[field];
-    if (v && v.trim()) set.add(v.trim());
+    if (!v || !v.trim()) return;
+    const val = v.trim();
+    const eCtx = (e.context || '').toLowerCase();
+    const ePrj = (e.project || '').toLowerCase();
+    let weight = 0;
+    if (ctxL && eCtx === ctxL) weight += 2;       // gleicher Kontext
+    if (prjL && ePrj === prjL) weight += 3;       // gleiches Projekt (stärker)
+    const time = new Date(e.modified || e.start).getTime();
+    const prev = best.get(val);
+    if (!prev || weight > prev.weight || (weight === prev.weight && time > prev.time)) {
+      best.set(val, { weight, time });
+    }
   });
-  return Array.from(set);
+  return Array.from(best.entries())
+    .sort((a, b) => (b[1].weight - a[1].weight) || (b[1].time - a[1].time))
+    .map(([val]) => val);
 }
 
 function highlightMatch(text, query) {
@@ -1106,23 +1496,15 @@ function highlightMatch(text, query) {
 function showSuggestions(input, field) {
   const query = input.value.trim();
   const queryLower = query.toLowerCase();
-  const pool = buildSuggestionPool(field);
-  // Filtern: bei leerem Feld die zuletzt benutzten zeigen, sonst nach Substring
+  const ctx = currentInputContext();
+  const ranked = rankedSuggestions(field, ctx);
+  // Bei leerem Feld die relevantesten/jüngsten zeigen, sonst nach Substring
+  // filtern – die Reihenfolge bleibt kontextgewichtet.
   let matches;
   if (queryLower === '') {
-    // Sortiere pool nach Häufigkeit + Aktualität: nimm die letzten 5 Einträge dieser Art
-    const recent = entries
-      .filter(e => e[field] && e[field].trim())
-      .slice().sort((a, b) => new Date(b.modified || b.start) - new Date(a.modified || a.start))
-      .map(e => e[field].trim());
-    const seen = new Set();
-    matches = [];
-    for (const v of recent) {
-      if (!seen.has(v)) { seen.add(v); matches.push(v); }
-      if (matches.length >= 5) break;
-    }
+    matches = ranked.slice(0, 5);
   } else {
-    matches = pool
+    matches = ranked
       .filter(v => v.toLowerCase().includes(queryLower) && v.toLowerCase() !== queryLower)
       .slice(0, 5);
   }
@@ -1155,6 +1537,73 @@ function setupSuggestions(field) {
   input.addEventListener('input', () => showSuggestions(input, field));
   input.addEventListener('focus', () => showSuggestions(input, field));
   input.addEventListener('blur', () => setTimeout(() => hideSuggestions(field), 150));
+}
+
+// ---------- Projekt-Vorschläge relativ zum Kontext ----------
+//
+// Das Projektfeld zeigt zusätzlich zur kompletten datalist eine eigene
+// Vorschlagsbox, die – sobald ein Kontext eingegeben ist – die zu diesem
+// Kontext passenden Projekte zuerst anbietet (z. B. „Literatur" → „TEXT BQM").
+
+// Liefert Projekte nach Relevanz zum gegebenen Kontext, jüngste zuerst.
+function rankedProjects(ctxName) {
+  const ctxL = (ctxName || '').toLowerCase();
+  const best = new Map(); // project -> { weight, time }
+  entries.forEach(e => {
+    if (!e.project || !e.project.trim()) return;
+    const val = e.project.trim();
+    const eCtx = (e.context || '').toLowerCase();
+    const weight = (ctxL && eCtx === ctxL) ? 1 : 0;
+    const time = new Date(e.modified || e.start).getTime();
+    const prev = best.get(val);
+    if (!prev || weight > prev.weight || (weight === prev.weight && time > prev.time)) {
+      best.set(val, { weight, time });
+    }
+  });
+  return Array.from(best.entries())
+    .sort((a, b) => (b[1].weight - a[1].weight) || (b[1].time - a[1].time))
+    .map(([val]) => val);
+}
+
+function showProjectSuggestions() {
+  const input = $('project');
+  const el = $('project-suggestions');
+  if (!input || !el) return;
+  const query = input.value.trim();
+  const queryLower = query.toLowerCase();
+  const ctxName = $('context') ? $('context').value.trim() : '';
+  const ranked = rankedProjects(ctxName);
+  let matches;
+  if (queryLower === '') {
+    matches = ranked.slice(0, 5);
+  } else {
+    matches = ranked
+      .filter(v => v.toLowerCase().includes(queryLower) && v.toLowerCase() !== queryLower)
+      .slice(0, 5);
+  }
+  if (matches.length === 0) {
+    el.classList.remove('show');
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = matches.map(m => `<div class="suggestion" data-val="${escapeHtml(m)}">${highlightMatch(m, query)}</div>`).join('');
+  el.classList.add('show');
+  el.querySelectorAll('.suggestion').forEach(s => {
+    s.addEventListener('mousedown', (ev) => {
+      ev.preventDefault();
+      input.value = s.dataset.val;
+      el.classList.remove('show');
+      input.focus();
+    });
+  });
+}
+
+function setupProjectSuggestions() {
+  const input = $('project');
+  if (!input) return;
+  input.addEventListener('input', showProjectSuggestions);
+  input.addEventListener('focus', showProjectSuggestions);
+  input.addEventListener('blur', () => setTimeout(() => $('project-suggestions').classList.remove('show'), 150));
 }
 
 // ---------- Kontext- & Projektverwaltung ----------
@@ -1222,6 +1671,55 @@ function closeProjects() {
 }
 
 // ---------- Analyse ----------
+
+function renderDayOverview() {
+  const el = $('day-overview');
+  if (!el) return;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayEntries = entries
+    .filter(e => e.start && e.stop && e.start.slice(0, 10) === todayKey)
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+  if (todayEntries.length === 0) {
+    el.innerHTML = '<div style="color:var(--text-dim);font-size:14px;text-align:center;padding:20px 0">Heute noch keine Einträge.</div>';
+    return;
+  }
+  let totalMs = 0;
+  todayEntries.forEach(e => { totalMs += new Date(e.stop) - new Date(e.start); });
+  // Kontext-Breakdown
+  const byCtx = new Map();
+  todayEntries.forEach(e => {
+    const ctx = e.context || '—';
+    byCtx.set(ctx, (byCtx.get(ctx) || 0) + (new Date(e.stop) - new Date(e.start)));
+  });
+  const ctxRows = Array.from(byCtx.entries()).sort((a, b) => b[1] - a[1]);
+  let html = `<div class="summary"><span>Heute · ${todayEntries.length} Eintr${todayEntries.length === 1 ? 'ag' : 'äge'}</span><strong>${formatDuration(totalMs)}</strong></div>`;
+  if (ctxRows.length > 1) {
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 14px;margin-bottom:12px">';
+    ctxRows.forEach(([ctx, ms], i) => {
+      const border = i < ctxRows.length - 1 ? ';border-bottom:1px solid var(--border)' : '';
+      html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0${border}"><span style="color:#a78bfa;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">${escapeHtml(ctx)}</span><span style="color:var(--text);font-size:13px;font-variant-numeric:tabular-nums">${formatHM(ms)}</span></div>`;
+    });
+    html += '</div>';
+  }
+  // Zeitblöcke (Tagesverlauf)
+  html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:4px 14px">';
+  todayEntries.forEach(e => {
+    const dur = new Date(e.stop) - new Date(e.start);
+    const metaParts = [];
+    if (e.context) metaParts.push(`<span style="color:#a78bfa">${escapeHtml(e.context)}</span>`);
+    if (e.project) metaParts.push(`<span style="color:var(--accent)">${escapeHtml(e.project)}</span>`);
+    if (e.arbeitsbereich) metaParts.push(`<span style="color:var(--blue)">${escapeHtml(e.arbeitsbereich)}</span>`);
+    const metaHtml = metaParts.length
+      ? `<div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px">${metaParts.join('<span style="color:var(--text-dim);margin:0 3px">·</span>')}</div>` : '';
+    html += `<div class="day-block">
+      <span class="day-block-time">${formatTime(e.start)}–${formatTime(e.stop)}</span>
+      <div class="day-block-meta">${metaHtml}<div style="font-size:13px;color:var(--text);line-height:1.35">${escapeHtml(e.intent)}</div></div>
+      <span class="day-block-dur">${formatHM(dur)}</span>
+    </div>`;
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
 
 function localDayKey(d) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -1436,6 +1934,338 @@ function syncAnalysisAfterRename(field, oldName, newName) {
   }
 }
 
+// ---------- Aufgaben ----------
+
+const STATUS_LABEL = { offen: 'Offen', 'läuft': 'Läuft', abgeschlossen: 'Abgeschlossen' };
+const STATUS_ITEM  = { offen: 'task-offen', 'läuft': 'task-laeuft', abgeschlossen: 'task-abgeschlossen' };
+const STATUS_BADGE = { offen: 'badge-offen', 'läuft': 'badge-laeuft', abgeschlossen: 'badge-abgeschlossen' };
+
+function refreshTaskFilterLists() {
+  const ctxSet = new Set(), prjSet = new Set(), pSet = new Set();
+  tasks.forEach(t => {
+    if (t.context) ctxSet.add(t.context);
+    if (t.project) prjSet.add(t.project);
+    if (t.zustaendig) pSet.add(t.zustaendig);
+  });
+  const ctxSel = $('task-filter-context');
+  const ctxCur = ctxSel.value;
+  ctxSel.innerHTML = '<option value="">Alle Kontexte</option>' +
+    Array.from(ctxSet).sort((a,b) => a.localeCompare(b,'de')).map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  ctxSel.value = ctxCur;
+  const prjSel = $('task-filter-project');
+  const prjCur = prjSel.value;
+  prjSel.innerHTML = '<option value="">Alle Projekte</option>' +
+    Array.from(prjSet).sort((a,b) => a.localeCompare(b,'de')).map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+  prjSel.value = prjCur;
+  const pSel = $('task-filter-person');
+  const pCur = pSel.value;
+  pSel.innerHTML = '<option value="">Alle Personen</option>' +
+    Array.from(pSet).sort((a,b) => a.localeCompare(b,'de')).map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+  pSel.value = pCur;
+}
+
+function renderTasks() {
+  refreshTaskFilterLists();
+  const filterStatus = $('task-filter-status').value;
+  const filterCtx    = $('task-filter-context').value;
+  const filterPrj    = $('task-filter-project').value;
+  const filterPerson = $('task-filter-person').value;
+  let list = tasks.slice();
+  if (filterStatus) list = list.filter(t => t.status === filterStatus);
+  if (filterCtx)    list = list.filter(t => t.context === filterCtx);
+  if (filterPrj)    list = list.filter(t => t.project === filterPrj);
+  if (filterPerson) list = list.filter(t => t.zustaendig === filterPerson);
+  list.sort((a, b) => {
+    const aA = a.status === 'abgeschlossen' ? 1 : 0;
+    const bA = b.status === 'abgeschlossen' ? 1 : 0;
+    if (aA !== bA) return aA - bA;
+    if (!a.faellig) return 1;
+    if (!b.faellig) return -1;
+    return a.faellig.localeCompare(b.faellig);
+  });
+  const container = $('tasks-list');
+  if (list.length === 0) {
+    container.innerHTML = '<div class="empty">Keine Aufgaben.</div>';
+    return;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  container.innerHTML = list.map(t => {
+    const sc = STATUS_ITEM[t.status] || 'task-offen';
+    const bc = STATUS_BADGE[t.status] || 'badge-offen';
+    const overdue = t.faellig && t.faellig < today && t.status !== 'abgeschlossen';
+    const faelligColor = overdue ? 'var(--danger)' : 'var(--text-dim)';
+    const faelligHtml = t.faellig
+      ? `<span style="font-size:12px;color:${faelligColor}">Fällig ${formatLocalDate(t.faellig)}</span>` : '';
+    const zustaendigHtml = t.zustaendig
+      ? `<span style="font-size:12px;color:var(--text-dim);margin-right:8px">${escapeHtml(t.zustaendig)}</span>` : '';
+    const metaParts = [];
+    if (t.context) metaParts.push(`<span class="ctx">${escapeHtml(t.context)}</span>`);
+    if (t.project) metaParts.push(`<span class="prj">${escapeHtml(t.project)}</span>`);
+    const metaCtxPrj = metaParts.length ? `<div class="entry-meta">${metaParts.join('<span class="sep">·</span>')}</div>` : '';
+    const abParts = [];
+    if (t.arbeitsbereich) abParts.push(`<span class="ab">${escapeHtml(t.arbeitsbereich)}</span>`);
+    if (t.workflow) abParts.push(`<span class="ab">${escapeHtml(t.workflow)}</span>`);
+    const metaAb = abParts.length ? `<div class="entry-meta">${abParts.join('<span class="sep">·</span>')}</div>` : '';
+    return `<div class="task-item ${sc}" data-id="${t.id}">
+      <div class="entry-head">
+        <span><span class="task-status-badge ${bc}">${escapeHtml(STATUS_LABEL[t.status] || t.status)}</span>${zustaendigHtml}</span>
+        ${faelligHtml}
+      </div>
+      ${metaCtxPrj}${metaAb}
+      <div class="entry-intent">${escapeHtml(t.intent)}</div>
+      <button class="task-transfer-btn" data-id="${t.id}">→ In Zeiterfassung übernehmen</button>
+    </div>`;
+  }).join('');
+  container.querySelectorAll('.task-item').forEach(el => {
+    el.addEventListener('click', ev => {
+      if (!ev.target.classList.contains('task-transfer-btn')) openTaskEdit(el.dataset.id);
+    });
+  });
+  container.querySelectorAll('.task-transfer-btn').forEach(btn => {
+    btn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const t = tasks.find(t => t.id === btn.dataset.id);
+      if (t) transferToTimer(t);
+    });
+  });
+}
+
+function openTaskNew() {
+  editingTaskId = null;
+  $('task-modal-title').textContent = 'Neue Aufgabe';
+  $('task-context').value = '';
+  $('task-project').value = '';
+  showExtendedFields('task-ctx-fields', '');
+  $('task-intent').value = '';
+  populateArbeitsbereichSelect('task-arbeitsbereich');
+  $('task-arbeitsbereich').value = '';
+  updateWorkflowSelect('task-arbeitsbereich', 'task-workflow');
+  $('task-workflow').value = '';
+  $('task-zustaendig').value = syncConfig?.person || '';
+  $('task-faellig').value = '';
+  $('task-status').value = 'offen';
+  $('task-delete').style.display = 'none';
+  $('btn-task-transfer-modal').style.display = 'none';
+  $('task-modal-back').classList.add('show');
+}
+
+function openTaskEdit(id) {
+  const task = tasks.find(t => t.id === id);
+  if (!task) return;
+  editingTaskId = id;
+  $('task-modal-title').textContent = 'Aufgabe bearbeiten';
+  $('task-context').value = task.context || '';
+  $('task-project').value = task.project || '';
+  showExtendedFields('task-ctx-fields', task.context || '');
+  $('task-intent').value = task.intent || '';
+  populateArbeitsbereichSelect('task-arbeitsbereich');
+  $('task-arbeitsbereich').value = task.arbeitsbereich || '';
+  updateWorkflowSelect('task-arbeitsbereich', 'task-workflow');
+  $('task-workflow').value = task.workflow || '';
+  $('task-zustaendig').value = task.zustaendig || '';
+  $('task-faellig').value = task.faellig || '';
+  $('task-status').value = task.status || 'offen';
+  $('task-delete').style.display = 'inline-block';
+  $('btn-task-transfer-modal').style.display = 'block';
+  $('task-modal-back').classList.add('show');
+}
+
+function closeTaskEdit() {
+  $('task-modal-back').classList.remove('show');
+  editingTaskId = null;
+}
+
+function saveTaskEdit() {
+  const intent = $('task-intent').value.trim();
+  if (!intent) { alert('Bitte das Aufgabenfeld ausfüllen.'); return; }
+  if (editingTaskId) {
+    const task = tasks.find(t => t.id === editingTaskId);
+    if (!task) return;
+    task.context       = $('task-context').value.trim();
+    task.project       = $('task-project').value.trim();
+    task.intent        = intent;
+    task.arbeitsbereich = $('task-arbeitsbereich').value;
+    task.workflow      = $('task-workflow').value;
+    task.zustaendig    = $('task-zustaendig').value.trim();
+    task.faellig       = $('task-faellig').value;
+    task.status        = $('task-status').value;
+    task.modified      = nowIso();
+  } else {
+    tasks.push({
+      id:            uid(),
+      context:       $('task-context').value.trim(),
+      project:       $('task-project').value.trim(),
+      intent,
+      arbeitsbereich: $('task-arbeitsbereich').value,
+      workflow:      $('task-workflow').value,
+      zustaendig:    $('task-zustaendig').value.trim(),
+      faellig:       $('task-faellig').value,
+      status:        $('task-status').value,
+      modified:      nowIso(),
+    });
+  }
+  saveTasks();
+  if (currentScreen === 'tasks') renderTasks();
+  closeTaskEdit();
+  syncNow();
+}
+
+function deleteTaskEdit() {
+  if (!confirm('Aufgabe wirklich löschen?')) return;
+  const idx = tasks.findIndex(t => t.id === editingTaskId);
+  if (idx === -1) { closeTaskEdit(); return; }
+  const tombstone = { ...tasks[idx], deleted: true, modified: nowIso() };
+  tasks.splice(idx, 1);
+  saveTasks();
+  if (currentScreen === 'tasks') renderTasks();
+  closeTaskEdit();
+  if (syncConfig) {
+    tasks.push(tombstone);
+    syncNow().finally(() => {
+      tasks = tasks.filter(t => !t.deleted);
+      saveTasks();
+    });
+  }
+}
+
+function transferToTimer(task) {
+  const ctx = task.context || '';
+  $('context').value = ctx;
+  showExtendedFields('ctx-fields', ctx);
+  populateArbeitsbereichSelect('arbeitsbereich');
+  $('arbeitsbereich').value = task.arbeitsbereich || '';
+  updateWorkflowSelect('arbeitsbereich', 'workflow');
+  $('workflow').value = task.workflow || '';
+  $('intent').value = task.intent || '';
+  updateStartButton();
+  switchScreen('timer');
+}
+
+// ---------- Arbeitsbereich / Workflow ----------
+
+const EXTENDED_CONTEXTS = ['spaz Verlag', 'VSPW'];
+
+function isExtendedContext(ctx) {
+  return EXTENDED_CONTEXTS.includes((ctx || '').trim());
+}
+
+function populateArbeitsbereichSelect(selectId) {
+  const sel = $(selectId);
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— keiner —</option>' +
+    Object.keys(DEFAULT_WORKFLOWS).map(k =>
+      `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`
+    ).join('');
+  if (current) sel.value = current;
+}
+
+function updateWorkflowSelect(arbeitsbereichId, selectId) {
+  const ab = $(arbeitsbereichId) ? $(arbeitsbereichId).value : '';
+  const sel = $(selectId);
+  if (!sel) return;
+  const list = (ab && workflows[ab]) ? workflows[ab] : [];
+  sel.innerHTML = '<option value="">— keiner —</option>' +
+    list.map(w => `<option value="${escapeHtml(w)}">${escapeHtml(w)}</option>`).join('');
+}
+
+function showExtendedFields(fieldsId, ctxVal) {
+  const el = $(fieldsId);
+  if (!el) return;
+  el.classList.toggle('show', isExtendedContext(ctxVal));
+}
+
+
+// ---------- Nachtrag ----------
+
+function openNachtrag() {
+  const now = new Date();
+  const stop = new Date(now); stop.setSeconds(0, 0);
+  const start = new Date(stop.getTime() - 60 * 60 * 1000);
+  $('nachtrag-start').value = toLocalInput(start.toISOString());
+  $('nachtrag-stop').value = toLocalInput(stop.toISOString());
+  $('nachtrag-context').value = '';
+  $('nachtrag-project').value = '';
+  $('nachtrag-arbeitsbereich').value = '';
+  $('nachtrag-workflow').value = '';
+  $('nachtrag-intent').value = '';
+  $('nachtrag-result').value = '';
+  populateArbeitsbereichSelect('nachtrag-arbeitsbereich');
+  showExtendedFields('nachtrag-ctx-fields', '');
+  $('nachtrag-back').classList.add('show');
+}
+
+function closeNachtrag() {
+  $('nachtrag-back').classList.remove('show');
+}
+
+function saveNachtrag() {
+  const startVal = $('nachtrag-start').value;
+  const stopVal = $('nachtrag-stop').value;
+  const intent = $('nachtrag-intent').value.trim();
+  if (!startVal || !stopVal) { alert('Bitte Start- und Stoppzeit angeben.'); return; }
+  if (!intent) { alert('Bitte „Was hast du vor?" ausfüllen.'); return; }
+  const startIso = fromLocalInput(startVal);
+  const stopIso = fromLocalInput(stopVal);
+  if (new Date(stopIso) <= new Date(startIso)) {
+    alert('Stoppzeit muss nach der Startzeit liegen.'); return;
+  }
+  const ab = $('nachtrag-arbeitsbereich').value;
+  const wf = $('nachtrag-workflow').value;
+  entries.push({
+    id: uid(),
+    kind: 'nachtrag',
+    context: $('nachtrag-context').value.trim(),
+    project: $('nachtrag-project').value.trim(),
+    arbeitsbereich: ab,
+    workflow: wf,
+    intent,
+    start: startIso,
+    stop: stopIso,
+    result: $('nachtrag-result').value.trim(),
+    modified: nowIso(),
+    person: syncConfig?.person || '',
+  });
+  saveAll();
+  refreshProjectList();
+  if (currentScreen === 'list') renderList();
+  closeNachtrag();
+  syncNow();
+}
+
+// ---------- Listenansicht ----------
+
+function renderListBreakdown(filtered) {
+  const bd = $('list-breakdown');
+  if (!bd) return;
+  const byCtx = new Map();
+  filtered.forEach(e => {
+    if (!e.stop) return;
+    const ctx = e.context || '(ohne Kontext)';
+    byCtx.set(ctx, (byCtx.get(ctx) || 0) + (new Date(e.stop) - new Date(e.start)));
+  });
+  let rows, isProject = false;
+  if (byCtx.size <= 1) {
+    const byPrj = new Map();
+    filtered.forEach(e => {
+      if (!e.stop || !e.project) return;
+      byPrj.set(e.project, (byPrj.get(e.project) || 0) + (new Date(e.stop) - new Date(e.start)));
+    });
+    if (byPrj.size <= 1) { bd.innerHTML = ''; return; }
+    rows = Array.from(byPrj.entries()).sort((a, b) => b[1] - a[1]);
+    isProject = true;
+  } else {
+    rows = Array.from(byCtx.entries()).sort((a, b) => b[1] - a[1]);
+  }
+  const color = isProject ? 'var(--accent)' : '#a78bfa';
+  let html = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 14px;margin-bottom:12px">';
+  rows.forEach(([label, ms], i) => {
+    const border = i < rows.length - 1 ? ';border-bottom:1px solid var(--border)' : '';
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0${border}"><span style="color:${color};font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px">${escapeHtml(label)}</span><span style="color:var(--text);font-size:13px;font-variant-numeric:tabular-nums">${formatHM(ms)}</span></div>`;
+  });
+  bd.innerHTML = html + '</div>';
+}
+
 // ---------- Settings ----------
 
 function openSettings() {
@@ -1444,11 +2274,13 @@ function openSettings() {
     $('cfg-repo').value = syncConfig.repo || 'zeiterfassung-data';
     $('cfg-path').value = syncConfig.path || 'data.json';
     $('cfg-token').value = syncConfig.token || '';
+    $('cfg-person').value = syncConfig.person || '';
   } else {
     $('cfg-owner').value = '';
     $('cfg-repo').value = 'zeiterfassung-data';
     $('cfg-path').value = 'data.json';
     $('cfg-token').value = '';
+    $('cfg-person').value = '';
   }
   $('cfg-result').textContent = '';
   $('cfg-result').className = '';
@@ -1469,7 +2301,7 @@ async function saveSettings() {
   $('cfg-result').textContent = 'Verbinde…';
   $('cfg-result').className = '';
   const previousConfig = syncConfig;
-  syncConfig = { owner, repo, path, token };
+  syncConfig = { owner, repo, path, token, person: $('cfg-person').value.trim() };
   try {
     await syncNow({ force: false });
     if (syncStatus === 'error') {
@@ -1515,9 +2347,66 @@ $('btn-stop').addEventListener('click', stop);
 $('intent').addEventListener('input', updateStartButton);
 setupSuggestions('intent');
 setupSuggestions('result');
+setupProjectSuggestions();
+$('context').addEventListener('input', () => {
+  const ctx = $('context').value;
+  showExtendedFields('ctx-fields', ctx);
+  if (!isExtendedContext(ctx)) { $('arbeitsbereich').value = ''; $('workflow').value = ''; }
+  populateArbeitsbereichSelect('arbeitsbereich');
+  updateWorkflowSelect('arbeitsbereich', 'workflow');
+});
+$('arbeitsbereich').addEventListener('change', () => {
+  $('workflow').value = '';
+  updateWorkflowSelect('arbeitsbereich', 'workflow');
+});
+$('edit-context').addEventListener('input', () => {
+  showExtendedFields('edit-ctx-fields', $('edit-context').value);
+  populateArbeitsbereichSelect('edit-arbeitsbereich');
+  updateWorkflowSelect('edit-arbeitsbereich', 'edit-workflow');
+});
+$('edit-arbeitsbereich').addEventListener('change', () => {
+  $('edit-workflow').value = '';
+  updateWorkflowSelect('edit-arbeitsbereich', 'edit-workflow');
+});
+$('btn-nachtrag').addEventListener('click', openNachtrag);
+$('nachtrag-cancel').addEventListener('click', closeNachtrag);
+$('nachtrag-save').addEventListener('click', saveNachtrag);
+$('nachtrag-back').addEventListener('click', (e) => { if (e.target.id === 'nachtrag-back') closeNachtrag(); });
+$('nachtrag-context').addEventListener('input', () => {
+  showExtendedFields('nachtrag-ctx-fields', $('nachtrag-context').value);
+  populateArbeitsbereichSelect('nachtrag-arbeitsbereich');
+  updateWorkflowSelect('nachtrag-arbeitsbereich', 'nachtrag-workflow');
+});
+$('nachtrag-arbeitsbereich').addEventListener('change', () => {
+  $('nachtrag-workflow').value = '';
+  updateWorkflowSelect('nachtrag-arbeitsbereich', 'nachtrag-workflow');
+});
 $('tab-timer').addEventListener('click', () => switchScreen('timer'));
 $('tab-list').addEventListener('click', () => switchScreen('list'));
 $('tab-analysis').addEventListener('click', () => switchScreen('analysis'));
+$('tab-tasks').addEventListener('click', () => switchScreen('tasks'));
+$('task-filter-status').addEventListener('change', renderTasks);
+$('task-filter-context').addEventListener('change', renderTasks);
+$('task-filter-project').addEventListener('change', renderTasks);
+$('task-filter-person').addEventListener('change', renderTasks);
+$('task-context').addEventListener('input', () => {
+  showExtendedFields('task-ctx-fields', $('task-context').value);
+  populateArbeitsbereichSelect('task-arbeitsbereich');
+  updateWorkflowSelect('task-arbeitsbereich', 'task-workflow');
+});
+$('btn-task-new').addEventListener('click', openTaskNew);
+$('task-cancel').addEventListener('click', closeTaskEdit);
+$('task-save').addEventListener('click', saveTaskEdit);
+$('task-delete').addEventListener('click', deleteTaskEdit);
+$('task-modal-back').addEventListener('click', e => { if (e.target.id === 'task-modal-back') closeTaskEdit(); });
+$('task-arbeitsbereich').addEventListener('change', () => {
+  $('task-workflow').value = '';
+  updateWorkflowSelect('task-arbeitsbereich', 'task-workflow');
+});
+$('btn-task-transfer-modal').addEventListener('click', () => {
+  const task = tasks.find(t => t.id === editingTaskId);
+  if (task) { transferToTimer(task); closeTaskEdit(); }
+});
 document.querySelectorAll('.range-presets button').forEach(b => {
   b.addEventListener('click', () => {
     analysis.preset = b.dataset.preset;
@@ -1541,6 +2430,7 @@ $('col-add-cancel').addEventListener('click', closeColAddForm);
 $('col-add-submit').addEventListener('click', submitColAdd);
 $('filter-context').addEventListener('change', renderList);
 $('filter-project').addEventListener('change', renderList);
+$('filter-person').addEventListener('change', renderList);
 $('filter-date-from').addEventListener('change', renderList);
 $('filter-date-to').addEventListener('change', renderList);
 $('btn-csv').addEventListener('click', exportCSV);
@@ -1565,6 +2455,10 @@ document.addEventListener('visibilitychange', () => {
 // Init
 if (active) startTicking();
 if (migrated) saveAll();
+if (!localStorage.getItem(WORKFLOWS_KEY)) saveWorkflows();
+populateArbeitsbereichSelect('arbeitsbereich');
+populateArbeitsbereichSelect('nachtrag-arbeitsbereich');
+populateArbeitsbereichSelect('task-arbeitsbereich');
 refreshProjectList();
 renderTimer();
 updateStartButton();

@@ -1840,7 +1840,8 @@ function renderProjectList() { renderManagedList('project', 'project-list', 'Noc
 function deleteField(field, name) {
   const label = field === 'context' ? 'Kontext' : 'Projekt';
   const count = entries.filter(e => e[field] === name).length;
-  if (!confirm(`${label} „${name}" entfernen?\n\n${count} Eintr${count === 1 ? 'ag' : 'äge'} werden angepasst (Feld wird geleert).`)) return;
+  const input = prompt(`${label} „${name}" entfernen?\n\n${count} Eintr${count === 1 ? 'ag' : 'äge'} werden angepasst (Feld wird geleert).\n\nZum Bestätigen „delete" eingeben:`);
+  if ((input || '').trim().toLowerCase() !== 'delete') return;
   entries.forEach(e => { if (e[field] === name) { e[field] = ''; e.modified = nowIso(); } });
   saveAll();
   syncAnalysisAfterRename(field, name, '');
@@ -1858,7 +1859,8 @@ function deleteArbeitsbereich(context, name) {
   const countT = tasks.filter(t => t.context === context && t.arbeitsbereich === name).length;
   const total = countE + countT;
   const wfHint = wfCount > 0 ? `\n${wfCount} zugehörige${wfCount === 1 ? 'r Workflow' : ' Workflows'} werden mitgelöscht.` : '';
-  if (!confirm(`Arbeitsbereich „${name}" entfernen?${wfHint}\n\n${total} Eintr${total === 1 ? 'ag' : 'äge'} werden angepasst.`)) return;
+  const input = prompt(`Arbeitsbereich „${name}" entfernen?${wfHint}\n\n${total} Eintr${total === 1 ? 'ag' : 'äge'} werden angepasst.\n\nZum Bestätigen „delete" eingeben:`);
+  if ((input || '').trim().toLowerCase() !== 'delete') return;
   renameArbeitsbereich(context, name, '');
 }
 
@@ -1866,7 +1868,8 @@ function deleteWorkflow(context, ab, name) {
   const countE = entries.filter(e => e.context === context && e.arbeitsbereich === ab && e.workflow === name).length;
   const countT = tasks.filter(t => t.context === context && t.arbeitsbereich === ab && t.workflow === name).length;
   const total = countE + countT;
-  if (!confirm(`Workflow „${name}" entfernen?\n\n${total} Eintr${total === 1 ? 'ag' : 'äge'} werden angepasst.`)) return;
+  const input = prompt(`Workflow „${name}" entfernen?\n\n${total} Eintr${total === 1 ? 'ag' : 'äge'} werden angepasst.\n\nZum Bestätigen „delete" eingeben:`);
+  if ((input || '').trim().toLowerCase() !== 'delete') return;
   renameWorkflow(context, ab, name, '');
 }
 

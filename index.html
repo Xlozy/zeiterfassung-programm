@@ -339,6 +339,14 @@ label:first-child { margin-top: 0; }
 .project-name { font-size: 15px; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-count { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; margin-left: 12px; }
 .wf-sub-item { margin-left: 16px; background: var(--surface); }
+.gear-action {
+  display: block; width: 100%;
+  padding: 15px 20px; text-align: left;
+  background: none; border: none;
+  font-size: 16px; font-family: inherit;
+  color: var(--text); cursor: pointer;
+}
+.gear-action:active { background: var(--surface-2); }
 .wf-add-btn {
   display: block; margin-left: 16px; margin-bottom: 10px; margin-top: 4px;
   padding: 7px 12px; font-size: 12px; font-family: inherit;
@@ -609,10 +617,6 @@ label:first-child { margin-top: 0; }
     </div>
     <div class="summary" id="summary"></div>
     <div id="entries"></div>
-    <div class="exports">
-      <button id="btn-csv">CSV-Export</button>
-      <button id="btn-projects">Kontexte & Projekte</button>
-    </div>
   </section>
 
   <section id="screen-analysis" style="display:none">
@@ -753,7 +757,6 @@ label:first-child { margin-top: 0; }
     <label>Arbeitsbereiche & Workflows</label>
     <p class="hint" style="margin-top:0">Tippe auf einen Eintrag zum Umbenennen. Leerer Name = überall entfernen.</p>
     <div id="workflow-mgmt-list"></div>
-    <button class="sec-btn" id="btn-ab-new" style="margin-top:8px;margin-bottom:4px">+ Arbeitsbereich hinzufügen</button>
     <div class="modal-buttons">
       <button class="cancel" id="projects-close">Schliessen</button>
     </div>
@@ -827,6 +830,17 @@ label:first-child { margin-top: 0; }
       <button class="cancel" id="nachtrag-cancel">Abbrechen</button>
       <button class="save" id="nachtrag-save">Speichern</button>
     </div>
+  </div>
+</div>
+
+<div class="modal-back" id="gear-menu-back">
+  <div class="modal" style="padding:8px 0 calc(8px + env(safe-area-inset-bottom))">
+    <button class="gear-action" id="gear-csv">CSV-Export</button>
+    <button class="gear-action" id="gear-projects">Angaben bearbeiten</button>
+    <div style="margin:4px 16px;border-top:1px solid var(--border)"></div>
+    <button class="gear-action" id="gear-settings">Sync-Einstellungen</button>
+    <div style="margin:4px 16px;border-top:1px solid var(--border)"></div>
+    <button class="gear-action" style="color:var(--text-dim)" id="gear-cancel">Abbrechen</button>
   </div>
 </div>
 
@@ -926,9 +940,18 @@ try {
     if (!Array.isArray(analysis.columns)) analysis.columns = [];
   }
   const storedWorkflows = JSON.parse(localStorage.getItem(WORKFLOWS_KEY) || 'null');
-  workflows = (storedWorkflows && typeof storedWorkflows === 'object' && !Array.isArray(storedWorkflows))
-    ? storedWorkflows
-    : JSON.parse(JSON.stringify(DEFAULT_WORKFLOWS));
+  if (storedWorkflows && typeof storedWorkflows === 'object' && !Array.isArray(storedWorkflows)) {
+    const firstVal = Object.values(storedWorkflows)[0];
+    if (firstVal === undefined || Array.isArray(firstVal)) {
+      // Altes flaches Format → zu spaz Verlag migrieren
+      workflows = { 'spaz Verlag': storedWorkflows, 'VSPW': {} };
+      localStorage.removeItem(WORKFLOWS_KEY); // trigger save im Init
+    } else {
+      workflows = storedWorkflows;
+    }
+  } else {
+    workflows = { 'spaz Verlag': JSON.parse(JSON.stringify(DEFAULT_WORKFLOWS)), 'VSPW': {} };
+  }
   tasks = JSON.parse(localStorage.getItem(TASKS_KEY) || '[]');
   if (!Array.isArray(tasks)) tasks = [];
   activeModified = localStorage.getItem(ACTIVE_MOD_KEY) || null;
@@ -1484,9 +1507,9 @@ function openEdit(id) {
   editingId = id;
   $('edit-context').value = entry.context || '';
   $('edit-project').value = entry.project || '';
-  populateArbeitsbereichSelect('edit-arbeitsbereich');
+  populateArbeitsbereichSelect('edit-arbeitsbereich', entry.context || '');
   $('edit-arbeitsbereich').value = entry.arbeitsbereich || '';
-  updateWorkflowSelect('edit-arbeitsbereich', 'edit-workflow');
+  updateWorkflowSelect('edit-arbeitsbereich', 'edit-workflow', entry.context || '');
   $('edit-workflow').value = entry.workflow || '';
   showExtendedFields('edit-ctx-fields', entry.context || '');
   $('edit-intent').value = entry.intent || '';
@@ -1792,19 +1815,21 @@ function renameField(field, oldName) {
   syncNow();
 }
 
-function renameArbeitsbereich(oldName, newName) {
-  const wfs = workflows[oldName] || [];
-  delete workflows[oldName];
-  if (newName) workflows[newName] = wfs;
+function renameArbeitsbereich(context, oldName, newName) {
+  if (!workflows[context]) workflows[context] = {};
+  const ctxWf = workflows[context];
+  const wfs = ctxWf[oldName] || [];
+  delete ctxWf[oldName];
+  if (newName) ctxWf[newName] = wfs;
   entries.forEach(e => {
-    if (e.arbeitsbereich === oldName) {
+    if (e.context === context && e.arbeitsbereich === oldName) {
       e.arbeitsbereich = newName;
       if (!newName) e.workflow = '';
       e.modified = nowIso();
     }
   });
   tasks.forEach(t => {
-    if (t.arbeitsbereich === oldName) {
+    if (t.context === context && t.arbeitsbereich === oldName) {
       t.arbeitsbereich = newName;
       if (!newName) t.workflow = '';
       t.modified = nowIso();
@@ -1819,22 +1844,23 @@ function renameArbeitsbereich(oldName, newName) {
   syncNow();
 }
 
-function renameWorkflow(ab, oldName, newName) {
-  if (workflows[ab]) {
-    const idx = workflows[ab].indexOf(oldName);
+function renameWorkflow(context, ab, oldName, newName) {
+  const ctxWf = workflows[context] || {};
+  if (ctxWf[ab]) {
+    const idx = ctxWf[ab].indexOf(oldName);
     if (idx !== -1) {
-      if (newName) workflows[ab][idx] = newName;
-      else workflows[ab].splice(idx, 1);
+      if (newName) ctxWf[ab][idx] = newName;
+      else ctxWf[ab].splice(idx, 1);
     }
   }
   entries.forEach(e => {
-    if (e.arbeitsbereich === ab && e.workflow === oldName) {
+    if (e.context === context && e.arbeitsbereich === ab && e.workflow === oldName) {
       e.workflow = newName;
       e.modified = nowIso();
     }
   });
   tasks.forEach(t => {
-    if (t.arbeitsbereich === ab && t.workflow === oldName) {
+    if (t.context === context && t.arbeitsbereich === ab && t.workflow === oldName) {
       t.workflow = newName;
       t.modified = nowIso();
     }
@@ -1851,49 +1877,61 @@ function renameWorkflow(ab, oldName, newName) {
 function renderWorkflowMgmtList() {
   const container = $('workflow-mgmt-list');
   if (!container) return;
-  const abs = Object.keys(workflows);
-  if (abs.length === 0) {
-    container.innerHTML = '<div class="empty" style="padding:16px">Keine Arbeitsbereiche definiert.</div>';
-    return;
-  }
-  container.innerHTML = abs.map(ab => {
-    const wfs = workflows[ab] || [];
-    const wfItems = wfs.map(wf =>
-      `<div class="project-item wf-sub-item" data-type="wf" data-ab="${escapeHtml(ab)}" data-name="${escapeHtml(wf)}">
-        <div class="project-name" style="font-size:13px">${escapeHtml(wf)}</div>
-      </div>`
-    ).join('');
-    return `<div class="project-item" data-type="ab" data-name="${escapeHtml(ab)}">
-        <div class="project-name">${escapeHtml(ab)}</div>
-      </div>
-      ${wfItems}
-      <button class="wf-add-btn" data-ab="${escapeHtml(ab)}">+ Workflow hinzufügen</button>`;
+  container.innerHTML = EXTENDED_CONTEXTS.map(ctx => {
+    const ctxWf = workflows[ctx] || {};
+    const abs = Object.keys(ctxWf);
+    const abItems = abs.map(ab => {
+      const wfs = ctxWf[ab] || [];
+      const wfItems = wfs.map(wf =>
+        `<div class="project-item wf-sub-item" data-type="wf" data-ctx="${escapeHtml(ctx)}" data-ab="${escapeHtml(ab)}" data-name="${escapeHtml(wf)}">
+          <div class="project-name" style="font-size:13px">${escapeHtml(wf)}</div>
+        </div>`
+      ).join('');
+      return `<div class="project-item" data-type="ab" data-ctx="${escapeHtml(ctx)}" data-name="${escapeHtml(ab)}">
+          <div class="project-name">${escapeHtml(ab)}</div>
+        </div>
+        ${wfItems}
+        <button class="wf-add-btn" data-ctx="${escapeHtml(ctx)}" data-ab="${escapeHtml(ab)}">+ Workflow hinzufügen</button>`;
+    }).join('');
+    return `<div style="font-size:11px;font-weight:600;color:#a78bfa;text-transform:uppercase;letter-spacing:0.5px;margin:10px 0 4px;padding-left:2px">${escapeHtml(ctx)}</div>
+      ${abItems}
+      <button class="wf-add-btn" data-ctx="${escapeHtml(ctx)}" data-ab="">+ Arbeitsbereich hinzufügen</button>`;
   }).join('');
   container.querySelectorAll('[data-type="ab"]').forEach(el => {
     el.addEventListener('click', () => {
-      const old = el.dataset.name;
+      const ctx = el.dataset.ctx, old = el.dataset.name;
       const val = prompt(`Arbeitsbereich „${old}" umbenennen.\n\nNeuer Name (leer = überall entfernen):`, old);
       if (val === null || val.trim() === old) return;
-      renameArbeitsbereich(old, val.trim());
+      renameArbeitsbereich(ctx, old, val.trim());
     });
   });
   container.querySelectorAll('[data-type="wf"]').forEach(el => {
     el.addEventListener('click', () => {
-      const ab = el.dataset.ab, old = el.dataset.name;
+      const ctx = el.dataset.ctx, ab = el.dataset.ab, old = el.dataset.name;
       const val = prompt(`Workflow „${old}" umbenennen.\n\nNeuer Name (leer = überall entfernen):`, old);
       if (val === null || val.trim() === old) return;
-      renameWorkflow(ab, old, val.trim());
+      renameWorkflow(ctx, ab, old, val.trim());
     });
   });
   container.querySelectorAll('.wf-add-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      const ab = btn.dataset.ab;
-      const name = prompt(`Neuer Workflow für „${ab}":`, '');
-      if (!name || !name.trim()) return;
-      const n = name.trim();
-      if (!workflows[ab]) workflows[ab] = [];
-      if (workflows[ab].includes(n)) { alert('Dieser Workflow existiert bereits.'); return; }
-      workflows[ab].push(n);
+      const ctx = btn.dataset.ctx, ab = btn.dataset.ab;
+      if (!ab) {
+        const name = prompt(`Neuer Arbeitsbereich für „${ctx}":`, '');
+        if (!name || !name.trim()) return;
+        const n = name.trim();
+        if (!workflows[ctx]) workflows[ctx] = {};
+        if (workflows[ctx][n] !== undefined) { alert('Dieser Arbeitsbereich existiert bereits.'); return; }
+        workflows[ctx][n] = [];
+      } else {
+        const name = prompt(`Neuer Workflow für „${ab}":`, '');
+        if (!name || !name.trim()) return;
+        const n = name.trim();
+        if (!workflows[ctx]) workflows[ctx] = {};
+        if (!workflows[ctx][ab]) workflows[ctx][ab] = [];
+        if (workflows[ctx][ab].includes(n)) { alert('Dieser Workflow existiert bereits.'); return; }
+        workflows[ctx][ab].push(n);
+      }
       workflowsModified = nowIso();
       saveWorkflows();
       renderWorkflowMgmtList();
@@ -2316,9 +2354,9 @@ function openTaskNew() {
   $('task-project').value = '';
   showExtendedFields('task-ctx-fields', '');
   $('task-intent').value = '';
-  populateArbeitsbereichSelect('task-arbeitsbereich');
+  populateArbeitsbereichSelect('task-arbeitsbereich', '');
   $('task-arbeitsbereich').value = '';
-  updateWorkflowSelect('task-arbeitsbereich', 'task-workflow');
+  updateWorkflowSelect('task-arbeitsbereich', 'task-workflow', '');
   $('task-workflow').value = '';
   $('task-zustaendig').value = syncConfig?.person || '';
   $('task-faellig').value = '';
@@ -2337,9 +2375,9 @@ function openTaskEdit(id) {
   $('task-project').value = task.project || '';
   showExtendedFields('task-ctx-fields', task.context || '');
   $('task-intent').value = task.intent || '';
-  populateArbeitsbereichSelect('task-arbeitsbereich');
+  populateArbeitsbereichSelect('task-arbeitsbereich', task.context || '');
   $('task-arbeitsbereich').value = task.arbeitsbereich || '';
-  updateWorkflowSelect('task-arbeitsbereich', 'task-workflow');
+  updateWorkflowSelect('task-arbeitsbereich', 'task-workflow', task.context || '');
   $('task-workflow').value = task.workflow || '';
   $('task-zustaendig').value = task.zustaendig || '';
   $('task-faellig').value = task.faellig || '';
@@ -2411,9 +2449,9 @@ function transferToTimer(task) {
   const ctx = task.context || '';
   $('context').value = ctx;
   showExtendedFields('ctx-fields', ctx);
-  populateArbeitsbereichSelect('arbeitsbereich');
+  populateArbeitsbereichSelect('arbeitsbereich', ctx);
   $('arbeitsbereich').value = task.arbeitsbereich || '';
-  updateWorkflowSelect('arbeitsbereich', 'workflow');
+  updateWorkflowSelect('arbeitsbereich', 'workflow', ctx);
   $('workflow').value = task.workflow || '';
   $('intent').value = task.intent || '';
   updateStartButton();
@@ -2429,22 +2467,24 @@ function isExtendedContext(ctx) {
   return EXTENDED_CONTEXTS.includes((ctx || '').trim());
 }
 
-function populateArbeitsbereichSelect(selectId) {
+function populateArbeitsbereichSelect(selectId, context) {
   const sel = $(selectId);
   if (!sel) return;
   const current = sel.value;
+  const ctxWf = (context && workflows[context]) ? workflows[context] : {};
   sel.innerHTML = '<option value="">— keiner —</option>' +
-    Object.keys(workflows).map(k =>
+    Object.keys(ctxWf).map(k =>
       `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`
     ).join('');
   if (current) sel.value = current;
 }
 
-function updateWorkflowSelect(arbeitsbereichId, selectId) {
+function updateWorkflowSelect(arbeitsbereichId, selectId, context) {
   const ab = $(arbeitsbereichId) ? $(arbeitsbereichId).value : '';
   const sel = $(selectId);
   if (!sel) return;
-  const list = (ab && workflows[ab]) ? workflows[ab] : [];
+  const ctxWf = (context && workflows[context]) ? workflows[context] : {};
+  const list = (ab && ctxWf[ab]) ? ctxWf[ab] : [];
   sel.innerHTML = '<option value="">— keiner —</option>' +
     list.map(w => `<option value="${escapeHtml(w)}">${escapeHtml(w)}</option>`).join('');
 }
@@ -2470,7 +2510,7 @@ function openNachtrag() {
   $('nachtrag-workflow').value = '';
   $('nachtrag-intent').value = '';
   $('nachtrag-result').value = '';
-  populateArbeitsbereichSelect('nachtrag-arbeitsbereich');
+  populateArbeitsbereichSelect('nachtrag-arbeitsbereich', '');
   showExtendedFields('nachtrag-ctx-fields', '');
   $('nachtrag-back').classList.add('show');
 }
@@ -2645,34 +2685,36 @@ $('context').addEventListener('input', () => {
   const ctx = $('context').value;
   showExtendedFields('ctx-fields', ctx);
   if (!isExtendedContext(ctx)) { $('arbeitsbereich').value = ''; $('workflow').value = ''; }
-  populateArbeitsbereichSelect('arbeitsbereich');
-  updateWorkflowSelect('arbeitsbereich', 'workflow');
+  populateArbeitsbereichSelect('arbeitsbereich', ctx);
+  updateWorkflowSelect('arbeitsbereich', 'workflow', ctx);
 });
 $('arbeitsbereich').addEventListener('change', () => {
   $('workflow').value = '';
-  updateWorkflowSelect('arbeitsbereich', 'workflow');
+  updateWorkflowSelect('arbeitsbereich', 'workflow', $('context').value);
 });
 $('edit-context').addEventListener('input', () => {
-  showExtendedFields('edit-ctx-fields', $('edit-context').value);
-  populateArbeitsbereichSelect('edit-arbeitsbereich');
-  updateWorkflowSelect('edit-arbeitsbereich', 'edit-workflow');
+  const ctx = $('edit-context').value;
+  showExtendedFields('edit-ctx-fields', ctx);
+  populateArbeitsbereichSelect('edit-arbeitsbereich', ctx);
+  updateWorkflowSelect('edit-arbeitsbereich', 'edit-workflow', ctx);
 });
 $('edit-arbeitsbereich').addEventListener('change', () => {
   $('edit-workflow').value = '';
-  updateWorkflowSelect('edit-arbeitsbereich', 'edit-workflow');
+  updateWorkflowSelect('edit-arbeitsbereich', 'edit-workflow', $('edit-context').value);
 });
 $('btn-nachtrag').addEventListener('click', openNachtrag);
 $('nachtrag-cancel').addEventListener('click', closeNachtrag);
 $('nachtrag-save').addEventListener('click', saveNachtrag);
 $('nachtrag-back').addEventListener('click', (e) => { if (e.target.id === 'nachtrag-back') closeNachtrag(); });
 $('nachtrag-context').addEventListener('input', () => {
-  showExtendedFields('nachtrag-ctx-fields', $('nachtrag-context').value);
-  populateArbeitsbereichSelect('nachtrag-arbeitsbereich');
-  updateWorkflowSelect('nachtrag-arbeitsbereich', 'nachtrag-workflow');
+  const ctx = $('nachtrag-context').value;
+  showExtendedFields('nachtrag-ctx-fields', ctx);
+  populateArbeitsbereichSelect('nachtrag-arbeitsbereich', ctx);
+  updateWorkflowSelect('nachtrag-arbeitsbereich', 'nachtrag-workflow', ctx);
 });
 $('nachtrag-arbeitsbereich').addEventListener('change', () => {
   $('nachtrag-workflow').value = '';
-  updateWorkflowSelect('nachtrag-arbeitsbereich', 'nachtrag-workflow');
+  updateWorkflowSelect('nachtrag-arbeitsbereich', 'nachtrag-workflow', $('nachtrag-context').value);
 });
 $('tab-timer').addEventListener('click', () => switchScreen('timer'));
 $('tab-list').addEventListener('click', () => switchScreen('list'));
@@ -2683,9 +2725,10 @@ $('task-filter-context').addEventListener('change', renderTasks);
 $('task-filter-project').addEventListener('change', renderTasks);
 $('task-filter-person').addEventListener('change', renderTasks);
 $('task-context').addEventListener('input', () => {
-  showExtendedFields('task-ctx-fields', $('task-context').value);
-  populateArbeitsbereichSelect('task-arbeitsbereich');
-  updateWorkflowSelect('task-arbeitsbereich', 'task-workflow');
+  const ctx = $('task-context').value;
+  showExtendedFields('task-ctx-fields', ctx);
+  populateArbeitsbereichSelect('task-arbeitsbereich', ctx);
+  updateWorkflowSelect('task-arbeitsbereich', 'task-workflow', ctx);
 });
 $('btn-task-new').addEventListener('click', openTaskNew);
 $('task-cancel').addEventListener('click', closeTaskEdit);
@@ -2694,7 +2737,7 @@ $('task-delete').addEventListener('click', deleteTaskEdit);
 $('task-modal-back').addEventListener('click', e => { if (e.target.id === 'task-modal-back') closeTaskEdit(); });
 $('task-arbeitsbereich').addEventListener('change', () => {
   $('task-workflow').value = '';
-  updateWorkflowSelect('task-arbeitsbereich', 'task-workflow');
+  updateWorkflowSelect('task-arbeitsbereich', 'task-workflow', $('task-context').value);
 });
 $('btn-task-transfer-modal').addEventListener('click', () => {
   const task = tasks.find(t => t.id === editingTaskId);
@@ -2729,26 +2772,18 @@ $('filter-context').addEventListener('change', () => {
 });
 $('filter-project').addEventListener('change', renderList);
 $('filter-person').addEventListener('change', renderList);
-$('btn-csv').addEventListener('click', exportCSV);
-$('btn-projects').addEventListener('click', openProjects);
 $('projects-close').addEventListener('click', closeProjects);
 $('projects-back').addEventListener('click', (e) => { if (e.target.id === 'projects-back') closeProjects(); });
-$('btn-ab-new').addEventListener('click', () => {
-  const name = prompt('Name des neuen Arbeitsbereichs:', '');
-  if (!name || !name.trim()) return;
-  const n = name.trim();
-  if (workflows[n] !== undefined) { alert('Dieser Arbeitsbereich existiert bereits.'); return; }
-  workflows[n] = [];
-  workflowsModified = nowIso();
-  saveWorkflows();
-  renderWorkflowMgmtList();
-  syncNow();
-});
 $('edit-cancel').addEventListener('click', closeEdit);
 $('edit-save').addEventListener('click', saveEdit);
 $('edit-delete').addEventListener('click', deleteEdit);
 $('modal-back').addEventListener('click', (e) => { if (e.target.id === 'modal-back') closeEdit(); });
-$('btn-settings').addEventListener('click', openSettings);
+$('btn-settings').addEventListener('click', () => $('gear-menu-back').classList.add('show'));
+$('gear-csv').addEventListener('click', () => { $('gear-menu-back').classList.remove('show'); exportCSV(); });
+$('gear-projects').addEventListener('click', () => { $('gear-menu-back').classList.remove('show'); openProjects(); });
+$('gear-settings').addEventListener('click', () => { $('gear-menu-back').classList.remove('show'); openSettings(); });
+$('gear-cancel').addEventListener('click', () => $('gear-menu-back').classList.remove('show'));
+$('gear-menu-back').addEventListener('click', (e) => { if (e.target.id === 'gear-menu-back') $('gear-menu-back').classList.remove('show'); });
 $('sync-status').addEventListener('click', onSyncStatusClick);
 $('cfg-cancel').addEventListener('click', closeSettings);
 $('cfg-save').addEventListener('click', saveSettings);
@@ -2766,9 +2801,9 @@ if (!localStorage.getItem(WORKFLOWS_KEY) || !workflowsModified) {
   if (!workflowsModified) workflowsModified = nowIso();
   saveWorkflows();
 }
-populateArbeitsbereichSelect('arbeitsbereich');
-populateArbeitsbereichSelect('nachtrag-arbeitsbereich');
-populateArbeitsbereichSelect('task-arbeitsbereich');
+populateArbeitsbereichSelect('arbeitsbereich', '');
+populateArbeitsbereichSelect('nachtrag-arbeitsbereich', '');
+populateArbeitsbereichSelect('task-arbeitsbereich', '');
 refreshProjectList();
 renderTimer();
 updateStartButton();

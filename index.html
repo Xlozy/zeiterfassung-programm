@@ -338,6 +338,14 @@ label:first-child { margin-top: 0; }
 .project-item:active { background: var(--surface-2); }
 .project-name { font-size: 15px; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-count { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; margin-left: 12px; }
+.wf-sub-item { margin-left: 16px; background: var(--surface); }
+.wf-add-btn {
+  display: block; margin-left: 16px; margin-bottom: 10px; margin-top: 4px;
+  padding: 7px 12px; font-size: 12px; font-family: inherit;
+  background: none; border: 1px dashed var(--border); border-radius: 8px;
+  color: var(--text-dim); cursor: pointer;
+}
+.wf-add-btn:active { background: var(--surface-2); }
 
 /* Analyse */
 .range-presets {
@@ -742,6 +750,10 @@ label:first-child { margin-top: 0; }
     <div id="context-list"></div>
     <label>Projekte</label>
     <div id="project-list"></div>
+    <label>Arbeitsbereiche & Workflows</label>
+    <p class="hint" style="margin-top:0">Tippe auf einen Eintrag zum Umbenennen. Leerer Name = überall entfernen.</p>
+    <div id="workflow-mgmt-list"></div>
+    <button class="sec-btn" id="btn-ab-new" style="margin-top:8px;margin-bottom:4px">+ Arbeitsbereich hinzufügen</button>
     <div class="modal-buttons">
       <button class="cancel" id="projects-close">Schliessen</button>
     </div>
@@ -826,6 +838,7 @@ const ACTIVE_KEY = 'zeiterfassung_active_v1';
 const CONFIG_KEY = 'zeiterfassung_config_v1';
 const ANALYSIS_KEY = 'zeiterfassung_analysis_v1';
 const WORKFLOWS_KEY = 'zeiterfassung_workflows_v1';
+const WORKFLOWS_MOD_KEY = 'zeiterfassung_workflowsmod_v1';
 const TASKS_KEY = 'zeiterfassung_tasks_v1';
 const ACTIVE_MOD_KEY = 'zeiterfassung_activemod_v1';
 const SYNC_INTERVAL_MS = 60000;
@@ -901,6 +914,7 @@ let workflows = {};
 let tasks = [];
 let editingTaskId = null;
 let activeModified = null;
+let workflowsModified = null;
 
 try {
   entries = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
@@ -919,6 +933,7 @@ try {
   if (!Array.isArray(tasks)) tasks = [];
   activeModified = localStorage.getItem(ACTIVE_MOD_KEY) || null;
   if (active && !activeModified) activeModified = active.start;
+  workflowsModified = localStorage.getItem(WORKFLOWS_MOD_KEY) || null;
 } catch (e) { console.error('Speicher lesen fehlgeschlagen', e); }
 
 let migrated = false;
@@ -949,7 +964,10 @@ function saveAnalysis() {
   try { localStorage.setItem(ANALYSIS_KEY, JSON.stringify(analysis)); } catch (e) {}
 }
 function saveWorkflows() {
-  try { localStorage.setItem(WORKFLOWS_KEY, JSON.stringify(workflows)); } catch (e) {}
+  try {
+    localStorage.setItem(WORKFLOWS_KEY, JSON.stringify(workflows));
+    if (workflowsModified) localStorage.setItem(WORKFLOWS_MOD_KEY, workflowsModified);
+  } catch (e) {}
 }
 function saveTasks() {
   try { localStorage.setItem(TASKS_KEY, JSON.stringify(tasks)); } catch (e) {}
@@ -1023,10 +1041,12 @@ async function githubGet(cfg) {
   let parsed;
   try { parsed = JSON.parse(text); } catch (e) { throw new Error('Daten-Datei nicht lesbar (kein JSON)'); }
   return {
-    entries:        Array.isArray(parsed.entries) ? parsed.entries : [],
-    tasks:          Array.isArray(parsed.tasks)   ? parsed.tasks   : [],
-    active:         parsed.active         !== undefined ? parsed.active         : null,
-    activeModified: parsed.activeModified !== undefined ? parsed.activeModified : null,
+    entries:           Array.isArray(parsed.entries) ? parsed.entries : [],
+    tasks:             Array.isArray(parsed.tasks)   ? parsed.tasks   : [],
+    active:            parsed.active         !== undefined ? parsed.active         : null,
+    activeModified:    parsed.activeModified !== undefined ? parsed.activeModified : null,
+    workflows:         (parsed.workflows && typeof parsed.workflows === 'object' && !Array.isArray(parsed.workflows)) ? parsed.workflows : null,
+    workflowsModified: parsed.workflowsModified || null,
     sha: data.sha
   };
 }
@@ -1034,7 +1054,7 @@ async function githubGet(cfg) {
 async function githubPut(cfg, allEntries, allTasks, activeObj, activeModStr, sha) {
   const { token, owner, repo, path } = cfg;
   const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
-  const payload = { version: 1, updated: nowIso(), entries: allEntries, tasks: allTasks };
+  const payload = { version: 1, updated: nowIso(), entries: allEntries, tasks: allTasks, workflows, workflowsModified };
   if (activeModStr != null) { payload.active = activeObj; payload.activeModified = activeModStr; }
   const body = {
     message: `Sync ${new Date().toISOString()}`,
@@ -1213,21 +1233,38 @@ async function syncNow({ force = false } = {}) {
         JSON.stringify(active) === JSON.stringify(remPriv.active) &&
         activeModified === remPriv.activeModified;
 
+      // ---- Workflows merge (Last-Write-Wins über alle Repos) ----
+      const remPrivWfMod = remPriv.workflowsModified || null;
+      const remSharWfMod = hasShared ? (remShar.workflowsModified || null) : null;
+      const newestRemoteWfMod = [remPrivWfMod, remSharWfMod].filter(Boolean).sort().pop() || null;
+      const newestRemoteWf = (newestRemoteWfMod && remSharWfMod && remSharWfMod >= (remPrivWfMod || ''))
+        ? remShar.workflows : (newestRemoteWfMod ? remPriv.workflows : null);
+      const remoteWfNewer = newestRemoteWfMod && (!workflowsModified || newestRemoteWfMod > workflowsModified);
+      if (remoteWfNewer && newestRemoteWf) {
+        workflows = newestRemoteWf;
+        workflowsModified = newestRemoteWfMod;
+        saveWorkflows();
+      }
+      const samePrivWf = JSON.stringify(workflows) === JSON.stringify(remPriv.workflows || null) &&
+        workflowsModified === remPrivWfMod;
+      const sameSharWf = !hasShared || (JSON.stringify(workflows) === JSON.stringify(remShar.workflows || null) &&
+        workflowsModified === remSharWfMod);
+
       // ---- Skip-Check ----
       const samePriv      = entriesEqual(mergedPriv, remPriv.entries);
       const sameShar      = !hasShared || entriesEqual(mergedShar, remShar.entries);
       const samePrivTasks = entriesEqual(mergedPrivTasks, remPriv.tasks || []);
       const sameSharTasks = !hasShared || entriesEqual(mergedSharTasks, remShar.tasks || []);
-      if (samePriv && sameShar && samePrivTasks && sameSharTasks && sameActiveAsRemote && !force) {
+      if (samePriv && sameShar && samePrivTasks && sameSharTasks && sameActiveAsRemote && samePrivWf && sameSharWf && !force) {
         setSyncStatus('idle');
         return;
       }
 
       // ---- PUT ----
       try {
-        if (!samePriv || !samePrivTasks || !sameActiveAsRemote)
+        if (!samePriv || !samePrivTasks || !sameActiveAsRemote || !samePrivWf)
           await githubPut(syncConfig, mergedPriv, mergedPrivTasks, active, activeModified, remPriv.sha);
-        if (hasShared && (!sameShar || !sameSharTasks))
+        if (hasShared && (!sameShar || !sameSharTasks || !sameSharWf))
           await githubPut(syncConfig.shared, mergedShar, mergedSharTasks, null, null, remShar.sha);
         setSyncStatus('idle');
         return;
@@ -1755,9 +1792,120 @@ function renameField(field, oldName) {
   syncNow();
 }
 
+function renameArbeitsbereich(oldName, newName) {
+  const wfs = workflows[oldName] || [];
+  delete workflows[oldName];
+  if (newName) workflows[newName] = wfs;
+  entries.forEach(e => {
+    if (e.arbeitsbereich === oldName) {
+      e.arbeitsbereich = newName;
+      if (!newName) e.workflow = '';
+      e.modified = nowIso();
+    }
+  });
+  tasks.forEach(t => {
+    if (t.arbeitsbereich === oldName) {
+      t.arbeitsbereich = newName;
+      if (!newName) t.workflow = '';
+      t.modified = nowIso();
+    }
+  });
+  workflowsModified = nowIso();
+  saveWorkflows();
+  saveAll();
+  saveTasks();
+  renderWorkflowMgmtList();
+  if (currentScreen === 'list') renderList();
+  syncNow();
+}
+
+function renameWorkflow(ab, oldName, newName) {
+  if (workflows[ab]) {
+    const idx = workflows[ab].indexOf(oldName);
+    if (idx !== -1) {
+      if (newName) workflows[ab][idx] = newName;
+      else workflows[ab].splice(idx, 1);
+    }
+  }
+  entries.forEach(e => {
+    if (e.arbeitsbereich === ab && e.workflow === oldName) {
+      e.workflow = newName;
+      e.modified = nowIso();
+    }
+  });
+  tasks.forEach(t => {
+    if (t.arbeitsbereich === ab && t.workflow === oldName) {
+      t.workflow = newName;
+      t.modified = nowIso();
+    }
+  });
+  workflowsModified = nowIso();
+  saveWorkflows();
+  saveAll();
+  saveTasks();
+  renderWorkflowMgmtList();
+  if (currentScreen === 'list') renderList();
+  syncNow();
+}
+
+function renderWorkflowMgmtList() {
+  const container = $('workflow-mgmt-list');
+  if (!container) return;
+  const abs = Object.keys(workflows);
+  if (abs.length === 0) {
+    container.innerHTML = '<div class="empty" style="padding:16px">Keine Arbeitsbereiche definiert.</div>';
+    return;
+  }
+  container.innerHTML = abs.map(ab => {
+    const wfs = workflows[ab] || [];
+    const wfItems = wfs.map(wf =>
+      `<div class="project-item wf-sub-item" data-type="wf" data-ab="${escapeHtml(ab)}" data-name="${escapeHtml(wf)}">
+        <div class="project-name" style="font-size:13px">${escapeHtml(wf)}</div>
+      </div>`
+    ).join('');
+    return `<div class="project-item" data-type="ab" data-name="${escapeHtml(ab)}">
+        <div class="project-name">${escapeHtml(ab)}</div>
+      </div>
+      ${wfItems}
+      <button class="wf-add-btn" data-ab="${escapeHtml(ab)}">+ Workflow hinzufügen</button>`;
+  }).join('');
+  container.querySelectorAll('[data-type="ab"]').forEach(el => {
+    el.addEventListener('click', () => {
+      const old = el.dataset.name;
+      const val = prompt(`Arbeitsbereich „${old}" umbenennen.\n\nNeuer Name (leer = überall entfernen):`, old);
+      if (val === null || val.trim() === old) return;
+      renameArbeitsbereich(old, val.trim());
+    });
+  });
+  container.querySelectorAll('[data-type="wf"]').forEach(el => {
+    el.addEventListener('click', () => {
+      const ab = el.dataset.ab, old = el.dataset.name;
+      const val = prompt(`Workflow „${old}" umbenennen.\n\nNeuer Name (leer = überall entfernen):`, old);
+      if (val === null || val.trim() === old) return;
+      renameWorkflow(ab, old, val.trim());
+    });
+  });
+  container.querySelectorAll('.wf-add-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ab = btn.dataset.ab;
+      const name = prompt(`Neuer Workflow für „${ab}":`, '');
+      if (!name || !name.trim()) return;
+      const n = name.trim();
+      if (!workflows[ab]) workflows[ab] = [];
+      if (workflows[ab].includes(n)) { alert('Dieser Workflow existiert bereits.'); return; }
+      workflows[ab].push(n);
+      workflowsModified = nowIso();
+      saveWorkflows();
+      renderWorkflowMgmtList();
+      syncNow();
+    });
+  });
+}
+
 function openProjects() {
   renderContextList();
   renderProjectList();
+  renderWorkflowMgmtList();
   $('projects-back').classList.add('show');
 }
 function closeProjects() {
@@ -2286,7 +2434,7 @@ function populateArbeitsbereichSelect(selectId) {
   if (!sel) return;
   const current = sel.value;
   sel.innerHTML = '<option value="">— keiner —</option>' +
-    Object.keys(DEFAULT_WORKFLOWS).map(k =>
+    Object.keys(workflows).map(k =>
       `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`
     ).join('');
   if (current) sel.value = current;
@@ -2585,6 +2733,17 @@ $('btn-csv').addEventListener('click', exportCSV);
 $('btn-projects').addEventListener('click', openProjects);
 $('projects-close').addEventListener('click', closeProjects);
 $('projects-back').addEventListener('click', (e) => { if (e.target.id === 'projects-back') closeProjects(); });
+$('btn-ab-new').addEventListener('click', () => {
+  const name = prompt('Name des neuen Arbeitsbereichs:', '');
+  if (!name || !name.trim()) return;
+  const n = name.trim();
+  if (workflows[n] !== undefined) { alert('Dieser Arbeitsbereich existiert bereits.'); return; }
+  workflows[n] = [];
+  workflowsModified = nowIso();
+  saveWorkflows();
+  renderWorkflowMgmtList();
+  syncNow();
+});
 $('edit-cancel').addEventListener('click', closeEdit);
 $('edit-save').addEventListener('click', saveEdit);
 $('edit-delete').addEventListener('click', deleteEdit);
@@ -2603,7 +2762,10 @@ document.addEventListener('visibilitychange', () => {
 // Init
 if (active) startTicking();
 if (migrated) saveAll();
-if (!localStorage.getItem(WORKFLOWS_KEY)) saveWorkflows();
+if (!localStorage.getItem(WORKFLOWS_KEY) || !workflowsModified) {
+  if (!workflowsModified) workflowsModified = nowIso();
+  saveWorkflows();
+}
 populateArbeitsbereichSelect('arbeitsbereich');
 populateArbeitsbereichSelect('nachtrag-arbeitsbereich');
 populateArbeitsbereichSelect('task-arbeitsbereich');

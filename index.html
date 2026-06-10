@@ -347,6 +347,40 @@ label:first-child { margin-top: 0; }
   color: var(--text); cursor: pointer;
 }
 .gear-action:active { background: var(--surface-2); }
+details.accordion-section {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+details.accordion-section > summary {
+  padding: 12px 14px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+details.accordion-section > summary::-webkit-details-marker { display: none; }
+details.accordion-section > summary::after {
+  content: '›';
+  font-size: 20px;
+  color: var(--text-dim);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+details.accordion-section[open] > summary::after { transform: rotate(90deg); }
+.accordion-content { padding: 8px 0 4px; }
+.item-delete-btn {
+  background: none; border: none; color: var(--text-dim);
+  font-size: 18px; cursor: pointer; padding: 0 2px; line-height: 1;
+  font-family: inherit; flex-shrink: 0;
+}
+.item-delete-btn:active { color: var(--danger); }
 .wf-add-btn {
   display: block; margin-left: 16px; margin-bottom: 10px; margin-top: 4px;
   padding: 7px 12px; font-size: 12px; font-family: inherit;
@@ -746,17 +780,19 @@ label:first-child { margin-top: 0; }
 
 <div class="modal-back" id="projects-back">
   <div class="modal">
-    <h2>Kontexte & Projekte</h2>
-    <p class="hint">
-      Tippe auf einen Eintrag, um ihn umzubenennen. Die Änderung wirkt auf alle betroffenen Einträge. Leerer Name = bei allen Einträgen entfernen.
-    </p>
-    <label style="margin-top:4px">Kontexte</label>
-    <div id="context-list"></div>
-    <label>Projekte</label>
-    <div id="project-list"></div>
-    <label>Arbeitsbereiche & Workflows</label>
-    <p class="hint" style="margin-top:0">Tippe auf einen Eintrag zum Umbenennen. Leerer Name = überall entfernen.</p>
-    <div id="workflow-mgmt-list"></div>
+    <h2>Angaben bearbeiten</h2>
+    <details class="accordion-section" open>
+      <summary>Kontexte</summary>
+      <div id="context-list" class="accordion-content"></div>
+    </details>
+    <details class="accordion-section">
+      <summary>Projekte</summary>
+      <div id="project-list" class="accordion-content"></div>
+    </details>
+    <details class="accordion-section">
+      <summary>Arbeitsbereiche & Workflows</summary>
+      <div id="workflow-mgmt-list" class="accordion-content"></div>
+    </details>
     <div class="modal-buttons">
       <button class="cancel" id="projects-close">Schliessen</button>
     </div>
@@ -1780,23 +1816,67 @@ function renderManagedList(field, containerId, emptyText) {
   container.innerHTML = list.map(([name, count]) => `
     <div class="project-item" data-name="${escapeHtml(name)}">
       <div class="project-name">${escapeHtml(name)}</div>
-      <div class="project-count">${count} Eintr${count === 1 ? 'ag' : 'äge'}</div>
+      <div class="project-count" style="margin-right:6px">${count} Eintr${count === 1 ? 'ag' : 'äge'}</div>
+      <button class="item-delete-btn" data-name="${escapeHtml(name)}" title="Entfernen">×</button>
     </div>
   `).join('');
   container.querySelectorAll('.project-item').forEach(el => {
-    el.addEventListener('click', () => renameField(field, el.dataset.name));
+    el.addEventListener('click', ev => {
+      if (ev.target.classList.contains('item-delete-btn')) return;
+      renameField(field, el.dataset.name);
+    });
+  });
+  container.querySelectorAll('.item-delete-btn').forEach(btn => {
+    btn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      deleteField(field, btn.dataset.name);
+    });
   });
 }
 
 function renderContextList() { renderManagedList('context', 'context-list', 'Noch keine Kontexte erfasst.'); }
 function renderProjectList() { renderManagedList('project', 'project-list', 'Noch keine Projekte erfasst.'); }
 
+function deleteField(field, name) {
+  const label = field === 'context' ? 'Kontext' : 'Projekt';
+  const count = entries.filter(e => e[field] === name).length;
+  if (!confirm(`${label} „${name}" entfernen?\n\n${count} Eintr${count === 1 ? 'ag' : 'äge'} werden angepasst (Feld wird geleert).`)) return;
+  entries.forEach(e => { if (e[field] === name) { e[field] = ''; e.modified = nowIso(); } });
+  saveAll();
+  syncAnalysisAfterRename(field, name, '');
+  refreshProjectList();
+  renderContextList();
+  renderProjectList();
+  if (currentScreen === 'list') renderList();
+  syncNow();
+}
+
+function deleteArbeitsbereich(context, name) {
+  const ctxWf = workflows[context] || {};
+  const wfCount = (ctxWf[name] || []).length;
+  const countE = entries.filter(e => e.context === context && e.arbeitsbereich === name).length;
+  const countT = tasks.filter(t => t.context === context && t.arbeitsbereich === name).length;
+  const total = countE + countT;
+  const wfHint = wfCount > 0 ? `\n${wfCount} zugehörige${wfCount === 1 ? 'r Workflow' : ' Workflows'} werden mitgelöscht.` : '';
+  if (!confirm(`Arbeitsbereich „${name}" entfernen?${wfHint}\n\n${total} Eintr${total === 1 ? 'ag' : 'äge'} werden angepasst.`)) return;
+  renameArbeitsbereich(context, name, '');
+}
+
+function deleteWorkflow(context, ab, name) {
+  const countE = entries.filter(e => e.context === context && e.arbeitsbereich === ab && e.workflow === name).length;
+  const countT = tasks.filter(t => t.context === context && t.arbeitsbereich === ab && t.workflow === name).length;
+  const total = countE + countT;
+  if (!confirm(`Workflow „${name}" entfernen?\n\n${total} Eintr${total === 1 ? 'ag' : 'äge'} werden angepasst.`)) return;
+  renameWorkflow(context, ab, name, '');
+}
+
 function renameField(field, oldName) {
   const label = field === 'context' ? 'Kontext' : 'Projekt';
-  const input = prompt(`${label} "${oldName}" umbenennen.\n\nNeuer Name (leer = bei allen Einträgen entfernen):`, oldName);
+  const input = prompt(`${label} „${oldName}" umbenennen:`, oldName);
   if (input === null) return;
   const newName = input.trim();
   if (newName === oldName) return;
+  if (!newName) { alert('Bitte einen Namen eingeben. Zum Entfernen das × verwenden.'); return; }
   let changed = 0;
   entries.forEach(e => {
     if (e[field] === oldName) {
@@ -1885,32 +1965,55 @@ function renderWorkflowMgmtList() {
       const wfItems = wfs.map(wf =>
         `<div class="project-item wf-sub-item" data-type="wf" data-ctx="${escapeHtml(ctx)}" data-ab="${escapeHtml(ab)}" data-name="${escapeHtml(wf)}">
           <div class="project-name" style="font-size:13px">${escapeHtml(wf)}</div>
+          <button class="item-delete-btn" data-type="wf-del" data-ctx="${escapeHtml(ctx)}" data-ab="${escapeHtml(ab)}" data-name="${escapeHtml(wf)}" title="Entfernen">×</button>
         </div>`
       ).join('');
       return `<div class="project-item" data-type="ab" data-ctx="${escapeHtml(ctx)}" data-name="${escapeHtml(ab)}">
           <div class="project-name">${escapeHtml(ab)}</div>
+          <button class="item-delete-btn" data-type="ab-del" data-ctx="${escapeHtml(ctx)}" data-name="${escapeHtml(ab)}" title="Entfernen">×</button>
         </div>
         ${wfItems}
         <button class="wf-add-btn" data-ctx="${escapeHtml(ctx)}" data-ab="${escapeHtml(ab)}">+ Workflow hinzufügen</button>`;
     }).join('');
-    return `<div style="font-size:11px;font-weight:600;color:#a78bfa;text-transform:uppercase;letter-spacing:0.5px;margin:10px 0 4px;padding-left:2px">${escapeHtml(ctx)}</div>
-      ${abItems}
-      <button class="wf-add-btn" data-ctx="${escapeHtml(ctx)}" data-ab="">+ Arbeitsbereich hinzufügen</button>`;
+    return `<details class="accordion-section" style="margin-bottom:6px">
+      <summary style="font-size:13px;color:#a78bfa">${escapeHtml(ctx)}</summary>
+      <div class="accordion-content">
+        ${abItems}
+        <button class="wf-add-btn" data-ctx="${escapeHtml(ctx)}" data-ab="">+ Arbeitsbereich hinzufügen</button>
+      </div>
+    </details>`;
   }).join('');
+
   container.querySelectorAll('[data-type="ab"]').forEach(el => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', ev => {
+      if (ev.target.classList.contains('item-delete-btn')) return;
       const ctx = el.dataset.ctx, old = el.dataset.name;
-      const val = prompt(`Arbeitsbereich „${old}" umbenennen.\n\nNeuer Name (leer = überall entfernen):`, old);
+      const val = prompt(`Arbeitsbereich „${old}" umbenennen:`, old);
       if (val === null || val.trim() === old) return;
+      if (!val.trim()) { alert('Bitte einen Namen eingeben. Zum Entfernen das × verwenden.'); return; }
       renameArbeitsbereich(ctx, old, val.trim());
     });
   });
+  container.querySelectorAll('[data-type="ab-del"]').forEach(btn => {
+    btn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      deleteArbeitsbereich(btn.dataset.ctx, btn.dataset.name);
+    });
+  });
   container.querySelectorAll('[data-type="wf"]').forEach(el => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', ev => {
+      if (ev.target.classList.contains('item-delete-btn')) return;
       const ctx = el.dataset.ctx, ab = el.dataset.ab, old = el.dataset.name;
-      const val = prompt(`Workflow „${old}" umbenennen.\n\nNeuer Name (leer = überall entfernen):`, old);
+      const val = prompt(`Workflow „${old}" umbenennen:`, old);
       if (val === null || val.trim() === old) return;
+      if (!val.trim()) { alert('Bitte einen Namen eingeben. Zum Entfernen das × verwenden.'); return; }
       renameWorkflow(ctx, ab, old, val.trim());
+    });
+  });
+  container.querySelectorAll('[data-type="wf-del"]').forEach(btn => {
+    btn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      deleteWorkflow(btn.dataset.ctx, btn.dataset.ab, btn.dataset.name);
     });
   });
   container.querySelectorAll('.wf-add-btn').forEach(btn => {

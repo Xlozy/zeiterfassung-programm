@@ -847,7 +847,10 @@ details.accordion-section[open] > summary::after { transform: rotate(90deg); }
     <label>Kontext (optional)</label>
     <input type="text" id="nachtrag-context" list="contexts" autocomplete="off" placeholder="z. B. spaz Verlag">
     <label>Projekt (optional)</label>
-    <input type="text" id="nachtrag-project" autocomplete="off" placeholder="z. B. Website">
+    <div class="suggest-wrap">
+      <input type="text" id="nachtrag-project" autocomplete="off" placeholder="z. B. Website">
+      <div class="suggestions" id="nachtrag-project-suggestions"></div>
+    </div>
     <div id="nachtrag-ctx-fields" class="ctx-fields">
       <label>Arbeitsbereich</label>
       <select id="nachtrag-arbeitsbereich" autocomplete="off">
@@ -859,7 +862,10 @@ details.accordion-section[open] > summary::after { transform: rotate(90deg); }
       </select>
     </div>
     <label for="nachtrag-intent">Was hast du vor? <span style="color:var(--accent)">(obligatorisch)</span></label>
-    <textarea id="nachtrag-intent" placeholder="Kurz beschreiben, was du gemacht hast"></textarea>
+    <div class="suggest-wrap">
+      <textarea id="nachtrag-intent" placeholder="Kurz beschreiben, was du gemacht hast"></textarea>
+      <div class="suggestions" id="nachtrag-intent-suggestions"></div>
+    </div>
     <label>Was hast du gemacht? <span style="color:var(--text-dim)">(optional)</span></label>
     <textarea id="nachtrag-result" placeholder="Kurz festhalten, was du erreicht hast"></textarea>
     <div class="modal-buttons">
@@ -1683,10 +1689,10 @@ function highlightMatch(text, query) {
   return escapeHtml(text.slice(0, idx)) + '<mark>' + escapeHtml(text.slice(idx, idx + query.length)) + '</mark>' + escapeHtml(text.slice(idx + query.length));
 }
 
-function showSuggestions(input, field) {
+function showSuggestions(input, field, getCtx) {
   const query = input.value.trim();
   const queryLower = query.toLowerCase();
-  const ctx = currentInputContext();
+  const ctx = getCtx ? getCtx() : currentInputContext();
   const ranked = rankedSuggestions(field, ctx);
   // Bei leerem Feld die relevantesten/jüngsten zeigen, sonst nach Substring
   // filtern – die Reihenfolge bleibt kontextgewichtet.
@@ -1722,11 +1728,41 @@ function hideSuggestions(field) {
   $(field + '-suggestions').classList.remove('show');
 }
 
-function setupSuggestions(field) {
+function setupSuggestions(field, getCtx) {
   const input = $(field);
-  input.addEventListener('input', () => showSuggestions(input, field));
-  input.addEventListener('focus', () => showSuggestions(input, field));
+  input.addEventListener('input', () => showSuggestions(input, field, getCtx));
+  input.addEventListener('focus', () => showSuggestions(input, field, getCtx));
   input.addEventListener('blur', () => setTimeout(() => hideSuggestions(field), 150));
+}
+
+function setupProjectSuggestionsFor(inputId, suggestId, ctxInputId) {
+  const input = $(inputId);
+  if (!input) return;
+  const show = () => {
+    const el = $(suggestId);
+    if (!el) return;
+    const query = input.value.trim();
+    const queryLower = query.toLowerCase();
+    const ctxName = $(ctxInputId) ? $(ctxInputId).value.trim() : '';
+    const ranked = rankedProjects(ctxName);
+    const matches = queryLower === ''
+      ? ranked.slice(0, 5)
+      : ranked.filter(v => v.toLowerCase().includes(queryLower) && v.toLowerCase() !== queryLower).slice(0, 5);
+    if (matches.length === 0) { el.classList.remove('show'); el.innerHTML = ''; return; }
+    el.innerHTML = matches.map(m => `<div class="suggestion" data-val="${escapeHtml(m)}">${highlightMatch(m, query)}</div>`).join('');
+    el.classList.add('show');
+    el.querySelectorAll('.suggestion').forEach(s => {
+      s.addEventListener('mousedown', ev => {
+        ev.preventDefault();
+        input.value = s.dataset.val;
+        el.classList.remove('show');
+        input.focus();
+      });
+    });
+  };
+  input.addEventListener('input', show);
+  input.addEventListener('focus', show);
+  input.addEventListener('blur', () => setTimeout(() => { const el = $(suggestId); if (el) el.classList.remove('show'); }, 150));
 }
 
 // ---------- Projekt-Vorschläge relativ zum Kontext ----------
@@ -1755,45 +1791,8 @@ function rankedProjects(ctxName) {
     .map(([val]) => val);
 }
 
-function showProjectSuggestions() {
-  const input = $('project');
-  const el = $('project-suggestions');
-  if (!input || !el) return;
-  const query = input.value.trim();
-  const queryLower = query.toLowerCase();
-  const ctxName = $('context') ? $('context').value.trim() : '';
-  const ranked = rankedProjects(ctxName);
-  let matches;
-  if (queryLower === '') {
-    matches = ranked.slice(0, 5);
-  } else {
-    matches = ranked
-      .filter(v => v.toLowerCase().includes(queryLower) && v.toLowerCase() !== queryLower)
-      .slice(0, 5);
-  }
-  if (matches.length === 0) {
-    el.classList.remove('show');
-    el.innerHTML = '';
-    return;
-  }
-  el.innerHTML = matches.map(m => `<div class="suggestion" data-val="${escapeHtml(m)}">${highlightMatch(m, query)}</div>`).join('');
-  el.classList.add('show');
-  el.querySelectorAll('.suggestion').forEach(s => {
-    s.addEventListener('mousedown', (ev) => {
-      ev.preventDefault();
-      input.value = s.dataset.val;
-      el.classList.remove('show');
-      input.focus();
-    });
-  });
-}
-
 function setupProjectSuggestions() {
-  const input = $('project');
-  if (!input) return;
-  input.addEventListener('input', showProjectSuggestions);
-  input.addEventListener('focus', showProjectSuggestions);
-  input.addEventListener('blur', () => setTimeout(() => $('project-suggestions').classList.remove('show'), 150));
+  setupProjectSuggestionsFor('project', 'project-suggestions', 'context');
 }
 
 // ---------- Kontext- & Projektverwaltung ----------
@@ -2787,6 +2786,11 @@ $('intent').addEventListener('input', updateStartButton);
 setupSuggestions('intent');
 setupSuggestions('result');
 setupProjectSuggestions();
+setupSuggestions('nachtrag-intent', () => ({
+  context: $('nachtrag-context') ? $('nachtrag-context').value.trim() : '',
+  project: $('nachtrag-project') ? $('nachtrag-project').value.trim() : '',
+}));
+setupProjectSuggestionsFor('nachtrag-project', 'nachtrag-project-suggestions', 'nachtrag-context');
 $('context').addEventListener('input', () => {
   const ctx = $('context').value;
   showExtendedFields('ctx-fields', ctx);
@@ -2903,8 +2907,9 @@ document.addEventListener('visibilitychange', () => {
 // Init
 if (active) startTicking();
 if (migrated) saveAll();
-if (!localStorage.getItem(WORKFLOWS_KEY) || !workflowsModified) {
-  if (!workflowsModified) workflowsModified = nowIso();
+if (!localStorage.getItem(WORKFLOWS_KEY)) {
+  // Kein Timestamp setzen – beim ersten Sync gewinnt die Remote-Version,
+  // falls sie benutzerdefinierte Arbeitsbereiche enthält.
   saveWorkflows();
 }
 populateArbeitsbereichSelect('arbeitsbereich', '');
